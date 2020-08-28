@@ -38,13 +38,19 @@
 }
 
 .board {
-  border: 1px solid black;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(6, 4em);
+  grid-template-rows: [header] 1em repeat(10, 3em);
+  /* grid-auto-rows: 3em; */
+  grid-gap: 0.5em;
+
+  border: 1px solid red;
+  /* display: flex; */
+  /* flex-direction: column; */
   margin: auto;
-  width: 16.5em;
-  height: 30em;
-  justify-content: flex-end;
+  width: 18em;
+  /* height: 30em; */
+  /* justify-content: flex-end; */
 }
 
 .board .row {
@@ -52,14 +58,8 @@
   flex-direction: row;
 }
 
-.board .header {
-  display: flex;
-  flex-direction: row;
-  flex-grow: 1;
-  align-items: flex-start;
-}
-
 .column-header {
+  grid-row: header;
   flex: 1;
   height: 1em;
   margin: 0.25em;
@@ -73,7 +73,15 @@
 
 .tile-wrapper {
   flex: 0; 
-  padding: 0.5em;
+  /* padding: 0.5em; */
+}
+
+.tile-wrapper.swapping-tile {
+  background-color: lightsalmon !important;
+}
+
+.board.swapping .tile-wrapper:hover {
+  background-color: lightgoldenrodyellow;
 }
 
 .tile {

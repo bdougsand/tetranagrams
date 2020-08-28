@@ -2,6 +2,8 @@ import React from 'react';
 import logo from './logo.svg';
 import './App.css';
 
+// 
+
 //https://hasbro-new.custhelp.com/app/answers/detail/a_id/19/~/how-many-of-each-letter-tile-are-included-in-a-scrabble-game%3F
 const letters = {
   A: 9,
@@ -51,8 +53,11 @@ const initGame = () => {
     columns: 4,
     rows: 10,
     selectedColumn: 0,
-    /** @type {string} */
+    /** @type {TileData} */
     lastLetter: null,
+    _nextId: 1,
+    /** @type {[number, number]} */
+    swapping: null,
   };
 };
 
@@ -87,7 +92,8 @@ const gameReducer = (game, action) => {
       return {
         ...game,
         pool,
-        lastLetter: letter
+        lastLetter: { letter, id: game._nextId },
+        _nextId: game._nextId+1
       };
     }
 
@@ -98,15 +104,14 @@ const gameReducer = (game, action) => {
         return game;
       }
 
-      let row = 0;
+      let row = board.length;
 
-      while (row < board.length) {
-        if (!isBlank(board[row][selectedColumn]))
+      while (row > 0) {
+        if (!isBlank(board[row-1][selectedColumn]))
           break;
 
-        ++row;
+        --row;
       }
-      row -= 1;
 
       let newRow;
       if (board[row]) {
@@ -121,8 +126,9 @@ const gameReducer = (game, action) => {
       }
 
       newRow.splice(selectedColumn, 1, lastLetter);
-      const newBoard = ((row === -1 ? [newRow] : [...board.slice(0, row), newRow])
-                        .concat(board.slice(row+1)));
+      const newBoard = board.slice();
+      newBoard[row] = newRow;
+
       return {
         ...game,
         board: newBoard,
@@ -134,46 +140,100 @@ const gameReducer = (game, action) => {
     return ['DRAW_LETTER', 'DROP_LETTER'].map(type => ({ type })).reduce(gameReducer, game);
   }
 
+  case 'START_SWAPPING': {
+    return {
+      ...game,
+      swapping: [action.payload.row, action.payload.column]
+    };
+  }
+
+  case 'SWAP_WITH': {
+    const newBoard = game.board.slice();
+    const tileA = newBoard[game.swapping[0]][game.swapping[1]];
+    const tileB = newBoard[action.payload.row][action.payload.column];
+
+    newBoard[game.swapping[0]] = newBoard[game.swapping[0]].slice();
+    newBoard[action.payload.row] = newBoard[action.payload.row].slice();
+    newBoard[game.swapping[0]][game.swapping[1]] = tileB;
+    newBoard[action.payload.row][action.payload.column] = tileA;
+
+    return {
+      ...game,
+      board: newBoard,
+      swapping: null
+    };
+  }
+
     default:
       return game;
   }
 };
 
 const Tile = ({tile}) => {
-  return <div className="tile">{tile}</div>;
+  return <div className="tile">{tile.letter}</div>;
 };
 
 /** @typedef {any} TileData */
 /** @typedef {TileData[][]} BoardState */
 
 const Board = ({ game, TileComponent=Tile, dispatch }) => {
-  const { board: data, columns, selectedColumn } = game;
+  const { board: data, columns, rows, selectedColumn, swapping } = game;
   
   return (
-  <div className="board">
-    <div className="header">
-      {new Array(columns).fill(1).map((_, i) => (
-        <div className={'column-header ' + (i === selectedColumn ? 'selected' : '')}
-             onClick={() => { dispatch({ type: 'SELECT_COLUMN', payload: { column: i } }) }}
-         />
-      ))}
-    </div>
-    {data.map(row => {
+  <div className={"board" + (swapping ? ' swapping' : '')}>
+    {new Array(columns).fill(1).map((_, i) => (
+      <div className={'column-header ' + (i === selectedColumn ? 'selected' : '')}
+            onClick={() => { dispatch({ type: 'SELECT_COLUMN', payload: { column: i } }) }}
+        />
+    ))}
+    {data.map((row, r) => {
       return (
-        <div className="row">
-          {row.map(tile => {
+          row.map((tile, c) => {
+            const blank = isBlank(tile);
             return (
-              <div className="tile-wrapper">
-                <TileComponent tile={tile}/>
+              <div className={"tile-wrapper" + (blank ? ' blank' : '') + 
+                              (swapping && swapping[0] === r && swapping[1] === c ? ' swapping-tile' : '')}
+                  onClick={e => {
+                    if (swapping) {
+                      dispatch({ type: 'SWAP_WITH', payload: { row: r, column: c } });
+                    } else {
+                      dispatch({ type: 'START_SWAPPING', payload: { row: r, column: c } });
+                    }
+                  }}
+                   style={{ 'gridColumn': `${c+1}`, 'gridRow': `${rows-r+1}` }}
+                   key={tile.id} >
+                {isBlank(tile) ? null : <TileComponent tile={tile}/>}
               </div>
             );
-          })}
-        </div>
+          })
       );
     })}
   </div>
   );
-};
+}; 
+
+const Shapes = [
+  ['X ',
+   'X ',
+   'XX'],
+   [' X',
+    ' X',
+    'XX'],
+  ['X ',
+   'XX',
+   'X '],
+  ['X ',
+   'XX',
+   ' X'],
+   [' X',
+   'XX',
+   'X '],
+  ['XXXX'],
+  ['XX',
+   'XX'],
+];
+
+
 
 function App() {
   // pieces: move one at a time, 
@@ -188,6 +248,10 @@ function App() {
       <button onClick={() => dispatch({ type: 'DRAW_N_DROP' })}>
         Draw 'n' Drop
       </button>
+      <svg viewBox="0 0 3 3" width={50} height={75} >
+      <polyline points="0,0 " stroke={'blue'}  style={{ transform: `rotation(90deg)` }} strokeWidth={1} fill={'transparent'}/>
+        <path d="M 0,3 0,0 1,0 1,2 2,2 2,3 Z" transform={'rotate(90 1.5 1.5)'} style={{ fill: 'red', transform: `rotation(90deg)` }} />
+      </svg>
     </div>
   );
 }
