@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import logo from './logo.svg';
 import './App.css';
+
+import { Shapes, TetrominoShape } from './svg';
 
 // 
 
@@ -58,13 +60,187 @@ const initGame = () => {
     _nextId: 1,
     /** @type {[number, number]} */
     swapping: null,
+    /** @type {{ [k in number]: { shape: string[] } }} */
+    tetrominos: {},
   };
 };
+
+/** @typedef {{ id: number, letter?: string, tetromino?: boolean } | ' '} TileData */
 
 /** @type {(tile: TileData) => boolean} */
 const isBlank = tile => (tile === ' ');
 
+const isTetromino = tile => tile.tetromino;
+
+// check if TileData is a tetromino, then return all cells that are part of tetramino
+
+//
+//   ['** ', ' **'],
+// [[0,0], [0, 1], [1,1], [1,2]];
+
+/**
+ * convert array of strings into an array of relative coordinates, relative to the top left [0,0] of shape, unrotated
+ * 
+ * @param {number[]} coordinate
+ * @param {string[]} tetromino 
+ * @returns {number[][]}
+ */
+export const getCoordinates = (anchor, tetromino) => {
+  const boardCoordinates = [];
+  tetromino.forEach((str, yIdx) => {
+    Array.from(str).forEach((cel, xIdx) => {
+      if (cel !== ' '){
+        boardCoordinates.push([anchor[0] + xIdx, anchor[1] + yIdx]);
+      }
+    })
+  })
+  console.log(boardCoordinates);
+  return boardCoordinates;
+}
+
+
+//given actual coordinate of the top left, convert relative coordinates into board space coordinates
+
 /** @typedef {ReturnType<typeof initGame>} GameState */
+
+function drawLetter(game) {
+  if (game.lastLetter || !game.pool.length) {
+    return game;
+  }
+
+  const idx = randomIndex(game.pool);
+  const letter = game.pool[idx];
+  const pool = game.pool.slice(0, idx).concat(game.pool.slice(idx+1));
+
+  return {
+    ...game,
+    pool,
+    lastLetter: { letter, id: game._nextId },
+    _nextId: game._nextId+1
+  };
+}
+
+function findEmptyRow(board, column) {
+  let row = board.length;
+
+  while (row > 0) {
+    if (!isBlank(board[row-1][column]))
+      break;
+
+    --row;
+  }
+
+  return row;
+}
+
+function dropLetter(game) {
+  const { board, lastLetter, selectedColumn } = game;
+
+  if (!lastLetter) {
+    return game;
+  }
+
+  const row = findEmptyRow(board, selectedColumn);
+
+  let newRow;
+  if (board[row]) {
+    newRow = [...board[row]];
+  } else {
+    if (board.length >= game.rows) {
+      // Game over!
+      return game;
+    }
+
+    newRow = Array(game.columns).fill(' ');
+  }
+
+  newRow.splice(selectedColumn, 1, lastLetter);
+  const newBoard = board.slice();
+  newBoard[row] = newRow;
+
+  return {
+    ...game,
+    board: newBoard,
+    lastLetter: null,
+  };
+}
+
+/**
+ * @param {GameState["board"]} board
+ */
+function findUnsupported(board) {
+  const columnUnsupported = {};
+  const found = [];
+
+  for (let i = 0, rl = board.length; i < rl; i++) {
+    for (let j = 0, cl = board[i].length; j < cl; j++) {
+      const tile = board[i][j];
+      if (isBlank(tile)) {
+        columnUnsupported[j] = true;
+      } else if (columnUnsupported[j]) {
+        found.push([i, j]);
+      }
+    }
+  }
+
+  return found;
+}
+
+/**
+ * @param {GameState} game
+ */
+function gameTick(game, tick) {
+  const unsupported = findUnsupported(game.board);
+  if (unsupported.length) {
+    const newGame = {
+      ...game,
+      board: [...game.board.map(row => [...row])]
+    };
+    for (const [i, j] of unsupported) {
+      newGame.board[i-1][j] = newGame.board[i][j];
+      newGame.board[i][j] = ' ';
+    }
+
+    return newGame;
+  }
+
+  return game;
+}
+
+function dropTetromino(game) {
+  const { board, selectedColumn, _nextId, tetrominos } = game;
+  const row = findEmptyRow(board, selectedColumn);
+  let newRow;
+  if (board[row]) {
+    newRow = [...board[row]];
+  } else {
+    if (board.length >= game.rows) {
+      // Game over!
+      return game;
+    }
+
+    newRow = Array(game.columns).fill(' ');
+  }
+
+  newRow.splice(selectedColumn, 1, {
+    tetromino: true,
+    id: _nextId
+  });
+  const newBoard = board.slice();
+  newBoard[row] = newRow;
+
+  return {
+    ...game,
+    board: newBoard,
+    _nextId: _nextId+1,
+    tetrominos: {
+      ...tetrominos,
+      [_nextId]: {
+        shape: Shapes[0]
+      }
+    }
+  };
+}
 
 /**
  * @param {GameState} game
@@ -80,64 +256,21 @@ const gameReducer = (game, action) => {
         selectedColumn: action.payload.column
       };
 
-    case 'DRAW_LETTER': {
-      if (game.lastLetter || !game.pool.length) {
-        return game;
-      }
+  case 'TICK':
+    return gameTick(game, action.payload);
 
-      const idx = randomIndex(game.pool);
-      const letter = game.pool[idx];
-      const pool = game.pool.slice(0, idx).concat(game.pool.slice(idx+1));
+  case 'DRAW_LETTER':
+    return drawLetter(game);
 
-      return {
-        ...game,
-        pool,
-        lastLetter: { letter, id: game._nextId },
-        _nextId: game._nextId+1
-      };
-    }
-
-    case 'DROP_LETTER': {
-      const { board, lastLetter, selectedColumn } = game;
-
-      if (!lastLetter) {
-        return game;
-      }
-
-      let row = board.length;
-
-      while (row > 0) {
-        if (!isBlank(board[row-1][selectedColumn]))
-          break;
-
-        --row;
-      }
-
-      let newRow;
-      if (board[row]) {
-        newRow = [...board[row]];
-      } else {
-        if (board.length >= game.rows) {
-          // Game over!
-          return game;
-        }
-
-        newRow = Array(game.columns).fill(' ');
-      }
-
-      newRow.splice(selectedColumn, 1, lastLetter);
-      const newBoard = board.slice();
-      newBoard[row] = newRow;
-
-      return {
-        ...game,
-        board: newBoard,
-        lastLetter: null,
-      };
-    }
+  case 'DROP_LETTER':
+    return dropLetter(game);
 
   case 'DRAW_N_DROP': {
     return ['DRAW_LETTER', 'DROP_LETTER'].map(type => ({ type })).reduce(gameReducer, game);
+  }
+
+  case 'DROP_TET': {
+    return dropTetromino(game);
   }
 
   case 'START_SWAPPING': {
@@ -173,12 +306,11 @@ const Tile = ({tile}) => {
   return <div className="tile">{tile.letter}</div>;
 };
 
-/** @typedef {any} TileData */
 /** @typedef {TileData[][]} BoardState */
 
 const Board = ({ game, TileComponent=Tile, dispatch }) => {
   const { board: data, columns, rows, selectedColumn, swapping } = game;
-  
+
   return (
   <div className={"board" + (swapping ? ' swapping' : '')}>
     {new Array(columns).fill(1).map((_, i) => (
@@ -200,9 +332,18 @@ const Board = ({ game, TileComponent=Tile, dispatch }) => {
                       dispatch({ type: 'START_SWAPPING', payload: { row: r, column: c } });
                     }
                   }}
-                   style={{ 'gridColumn': `${c+1}`, 'gridRow': `${rows-r+1}` }}
+                   style={{ 
+                     gridColumnStart: `${c+1}`, 
+                     gridColumnEnd: isTetromino(tile) ? c+2 : null,
+                     gridRowStart: isTetromino(tile) ? rows-r+1-2 : `${rows-r+1}`,
+                     gridRowEnd: isTetromino(tile) ? rows-r+2 : null
+                    }}
                    key={tile.id} >
-                {isBlank(tile) ? null : <TileComponent tile={tile}/>}
+                {isBlank(tile) ? null :
+                isTetromino(tile) ? <TetrominoShape shape={game.tetrominos[tile.id].shape}
+                                        className="tetromino"
+                                         /> :
+                 <TileComponent tile={tile}/>}
               </div>
             );
           })
@@ -210,34 +351,58 @@ const Board = ({ game, TileComponent=Tile, dispatch }) => {
     })}
   </div>
   );
-}; 
+};
 
-const Shapes = [
-  ['X ',
-   'X ',
-   'XX'],
-   [' X',
-    ' X',
-    'XX'],
-  ['X ',
-   'XX',
-   'X '],
-  ['X ',
-   'XX',
-   ' X'],
-   [' X',
-   'XX',
-   'X '],
-  ['XXXX'],
-  ['XX',
-   'XX'],
-];
+const useGameTick = (ms, dispatch, scale=1) => {
+  const state = useRef(null);
 
+  useEffect(() => {
+    if (state.current) {
+      const { interval } = state.current;
+      if (interval) {
+        clearTimeout(interval);
+      }
+    }
+
+    const interval = setInterval(() => {
+      dispatch({
+        type: 'TICK',
+        payload: {
+          delta: (Date.now() - state.current.last)*state.current.scale,
+          tick: state.current.tick++,
+        }
+      });
+
+      state.current.last = Date.now();
+    }, ms);
+
+    state.current = {
+      interval,
+      last: Date.now(),
+      scale,
+      tick: 0
+    };
+
+    return () => {
+      console.log('cleaning up');
+      clearTimeout(state.current.interval);
+      state.current = null;
+    };
+  }, [ms]);
+
+  useEffect(() => {
+    if (state.current)
+      state.current.scale = scale;
+
+  }, [scale]);
+};
 
 
 function App() {
-  // pieces: move one at a time, 
+  // pieces: move one at a time,
   const [game, dispatch] = React.useReducer(gameReducer, null, initGame);
+  const [shape, setShape] = useState(0);
+  useGameTick(500, dispatch);
   // console.log(JSON.stringify(game));
 
   return (
@@ -248,10 +413,14 @@ function App() {
       <button onClick={() => dispatch({ type: 'DRAW_N_DROP' })}>
         Draw 'n' Drop
       </button>
-      <svg viewBox="0 0 3 3" width={50} height={75} >
-      <polyline points="0,0 " stroke={'blue'}  style={{ transform: `rotation(90deg)` }} strokeWidth={1} fill={'transparent'}/>
-        <path d="M 0,3 0,0 1,0 1,2 2,2 2,3 Z" transform={'rotate(90 1.5 1.5)'} style={{ fill: 'red', transform: `rotation(90deg)` }} />
-      </svg>
+      <button onClick={() => dispatch({ type: 'DROP_TET' })}>
+        Drop Tetromino
+      </button>
+      <TetrominoShape shape={Shapes[shape]}
+                      onClick={() => setShape(i => ((i + 1) % Shapes.length))}
+                      className="tetromino"
+                      width={100}
+                      height={100} />
     </div>
   );
 }
