@@ -72,12 +72,20 @@
 }
 
 .tile-wrapper {
-  flex: 0; 
+  flex: 0;
   padding: 0.2em;
+}
+
+.tile-wrapper.swapping-tile {
+    z-index: 10;
 }
 
 .tile-wrapper.swapping-tile .tile {
   background-color: lightsalmon !important;
+}
+
+.tile-wrapper.swapping-tile .tetromino {
+    fill: lightsalmon;
 }
 
 .board.swapping .tile-wrapper:hover .tile {
@@ -103,5 +111,17 @@
     /* stroke: black;
     stroke-width: 0.1px; */
     transform: scaleY(-1);
+    pointer-events: none;
+}
+
+.tetromino.wide {
+    width: 100%;
+}
+
+.tetromino.tall {
     height: 100%;
+}
+
+.tetromino * {
+    pointer-events: painted;
 }

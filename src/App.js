@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import * as React from 'react';
+import { useEffect, useRef, useState } from 'react';
 import logo from './logo.svg';
 import './App.css';
 
@@ -71,6 +72,20 @@ const initGame = () => {
 const isBlank = tile => (tile === ' ');
 
 const isTetromino = tile => tile.tetromino;
+
+/** @type {(shape: string[]) => [number, number]} */
+const getShapeDimensions = shape => {
+  const w = shape.reduce(((max, row) => Math.max(max, row.length)), 0);
+
+  return [w, shape.length];
+};
+
+/** @type {(game: GameState) => [number, number]} */
+const getTetrominoDimensions = (game, id) => {
+  const tetro = game.tetrominos[id];
+
+  return tetro ? getShapeDimensions(tetro.shape) : null;
+};
 
 // check if TileData is a tetromino, then return all cells that are part of tetramino
 
@@ -207,7 +222,7 @@ function gameTick(game, tick) {
   return game;
 }
 
-function dropTetromino(game) {
+function dropTetromino(game, shape=Shapes[2]) {
   const { board, selectedColumn, _nextId, tetrominos } = game;
   const row = findEmptyRow(board, selectedColumn);
   let newRow;
@@ -236,7 +251,7 @@ function dropTetromino(game) {
     tetrominos: {
       ...tetrominos,
       [_nextId]: {
-        shape: Shapes[0]
+        shape
       }
     }
   };
@@ -308,6 +323,7 @@ const Tile = ({tile}) => {
 
 /** @typedef {TileData[][]} BoardState */
 
+/** @type {React.FunctionComponent<{ game: GameState, TileComponent: any, dispatch: any }>} */
 const Board = ({ game, TileComponent=Tile, dispatch }) => {
   const { board: data, columns, rows, selectedColumn, swapping } = game;
 
@@ -322,6 +338,26 @@ const Board = ({ game, TileComponent=Tile, dispatch }) => {
       return (
           row.map((tile, c) => {
             const blank = isBlank(tile);
+            const tetro = isTetromino(tile) && game.tetrominos[tile.id];
+            const row = rows-r+1;
+
+            const style = {
+              gridColumnStart: c+1,
+              gridRowStart: row
+            };
+            let tetroClasses = '';
+
+            if (tetro) {
+              const [w, h] = getShapeDimensions(tetro.shape);
+              Object.assign(style, {
+                gridColumnEnd: c+1+w,
+                gridRowStart: row-(h-1),
+                gridRowEnd: row+1,
+              });
+
+              tetroClasses = w > h ? 'wide' : 'tall';
+            }
+
             return (
               <div className={"tile-wrapper" + (blank ? ' blank' : '') + 
                               (swapping && swapping[0] === r && swapping[1] === c ? ' swapping-tile' : '')}
@@ -332,17 +368,12 @@ const Board = ({ game, TileComponent=Tile, dispatch }) => {
                       dispatch({ type: 'START_SWAPPING', payload: { row: r, column: c } });
                     }
                   }}
-                   style={{ 
-                     gridColumnStart: `${c+1}`, 
-                     gridColumnEnd: isTetromino(tile) ? c+2 : null,
-                     gridRowStart: isTetromino(tile) ? rows-r+1-2 : `${rows-r+1}`,
-                     gridRowEnd: isTetromino(tile) ? rows-r+2 : null
-                    }}
+                   style={style}
                    key={tile.id} >
-                {isBlank(tile) ? null :
-                isTetromino(tile) ? <TetrominoShape shape={game.tetrominos[tile.id].shape}
-                                        className="tetromino"
-                                         /> :
+                {blank ? null :
+                 tetro ? <TetrominoShape shape={game.tetrominos[tile.id].shape}
+                                         className={`tetromino ${tetroClasses}`}
+                        /> :
                  <TileComponent tile={tile}/>}
               </div>
             );
