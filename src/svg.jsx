@@ -24,13 +24,13 @@ export const Shapes = [
 function hit(x, y, dx, dy, shape) {
   if (dx) {
     const col = Math.min(x, x+dx);
-    const cellA = shape[y-1] && shape[y-1][col] || ' ';
-    const cellB = shape[y] && shape[y][col] || ' ';
+    const cellA = shape[y-1]?.[col] || ' ';
+    const cellB = shape[y]?.[col] || ' ';
     return cellA === cellB;
   } else if (dy) {
     const row = Math.min(y, y + dy);
-    const cellA = shape[row] && shape[row][x-1] || ' ';
-    const cellB = shape[row] && shape[row][x] || ' ';
+    const cellA = shape[row]?.[x-1] || ' ';
+    const cellB = shape[row]?.[x] || ' ';
     return cellA === cellB;
   }
 
@@ -46,6 +46,12 @@ export function startPoint(shape) {
     }
   }
 }
+
+const getShapeDimensions = (shape) => {
+  const w = shape.reduce(((max, row) => Math.max(max, row.length)), 0);
+
+  return [w, shape.length];
+};
 
 export function makePath(shape) {
     // Current positions
@@ -80,8 +86,11 @@ export function makePath(shape) {
   return points;
 }
 
-export const TetrominoShape = ({ shape, ...props }) => (
-  <svg viewBox="0 0 3 3" {...props} >
-    <path d={'M ' + makePath(shape).map(([x, y]) => `${x},${y}`).join(' ') + 'Z'} />
-  </svg>
-);
+export const TetrominoShape = ({ shape, ...props }) => {
+  const [w, h] = getShapeDimensions(shape);
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} {...props} >
+      <path d={'M ' + makePath(shape).map(([x, y]) => `${x},${y}`).join(' ') + 'Z'} />
+    </svg>
+  );
+}
