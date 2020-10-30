@@ -42,6 +42,7 @@ export interface GameState {
   pieces: { [id in string]: PlacedPiece };
 
   swapping: PieceId;
+  draggingOver: Coord;
 }
 
 // 
@@ -99,6 +100,7 @@ const initGame = (): GameState => {
     dropping: null,
     _nextId: 1,
     swapping: null,
+    draggingOver: null,
     pieces: {}
   };
 };
@@ -340,9 +342,9 @@ function randItem<T>(xs: T[]): T {
 }
 
 
-function swapPiece(game: GameState, dest: Coord) {
+function swapPiece(game: GameState, dest: Coord, pieceID=game.swapping) {
   const [col, row] = dest;
-  const piece = game.pieces[game.swapping];
+  const piece = game.pieces[pieceID];
   const newBoard = game.board.map(row => [...row]);
   newBoard[row][col] = null;
   if (!canPlace(newBoard, piece, dest))
@@ -398,13 +400,20 @@ const gameReducer = (game: GameState, action: { type: string, payload?: any }) =
       return swapPiece(game, [action.payload.column, action.payload.row]);
     }
 
+    case 'DROP_TILE': {
+      console.log(action);
+      return swapPiece(game, action.payload.coords, action.payload.pieceID);
+    }
+
     default:
       return game;
   }
 };
 
 const Tile: React.FC<{ tile: TileData }> = ({ tile }) =>
-  <div className="tile">{tile.letter}</div>;
+  <div className="tile" draggable data-pieceid={tile.id}>
+    {tile.letter}
+    </div>;
 
 type BoardProps = {
   game: GameState,
@@ -416,8 +425,64 @@ const Board: React.FC<BoardProps> =
   ({ game, TileComponent = Tile, dispatch }) => {
     const { board: data, columns, rows, selectedColumn, swapping } = game;
     const renderedIds = {};
+
+    const [dragState, setDragState] = React.useState(null);
+
+    const onDragStart = React.useCallback(e => {
+      let target: HTMLElement = e.target as HTMLElement;
+      while (target) {
+        if (target.hasAttribute('data-pieceid'))
+          break;
+        target = target.parentElement;
+      }
+
+      if (!target) return;
+
+      setDragState({ pieceID: parseInt(target.getAttribute('data-pieceid')) });
+    }, []);
+
+    const onDragOver = React.useCallback(e => {
+      let target: HTMLElement = e.target as HTMLElement;
+      while (target) {
+        if (target.classList.contains('tile-wrapper'))
+          break;
+        target = target.parentElement;
+      }
+
+      if (target) {
+        const coords = target.getAttribute('data-coords').split(',').map(s => parseInt(s));
+        setDragState(state => (state && { ...state, draggedOver: coords }));
+        e.preventDefault();
+      }
+    }, []);
+
+    const onDrop = React.useCallback(e => {
+      let target: HTMLElement = e.target as HTMLElement;
+      while (target) {
+        if (target.classList.contains('tile-wrapper'))
+          break;
+        target = target.parentElement;
+      }
+
+      if (target) {
+        const coords = target.getAttribute('data-coords').split(',').map(s => parseInt(s));
+        setDragState(state => {
+          if (state)
+            dispatch({ type: 'DROP_TILE', payload: { coords, pieceID: state.pieceID } });
+
+          return null;
+        });
+        
+        e.preventDefault();
+      }
+    }, [dispatch])
+
     return (
-      <div className={"board" + (swapping ? ' swapping' : '')}>
+      <div className={"board" + (swapping ? ' swapping' : '')}
+           onDragOver={onDragOver}
+           onDragStart={onDragStart}
+           onDrop={onDrop}
+      >
         {new Array(columns).fill(1).map((_, i) => (
           <div className={'column-header ' + (i === selectedColumn ? 'selected' : '')}
             onClick={() => { dispatch({ type: 'SELECT_COLUMN', payload: { column: i } }) }}
@@ -459,7 +524,11 @@ const Board: React.FC<BoardProps> =
               return (
                 <div className={"tile-wrapper" + (blank ? ' blank' : '') +
                   (swapping === id ? ' swapping-tile' : '') +
-                  (tetro ? ' tetromino' : '')}
+                  (tetro ? ' tetromino' : '') +
+                   (dragState && dragState.draggedOver && 
+                    (dragState.draggedOver[0] === c && dragState.draggedOver[1] === r) ? ' drop-target' : '')
+                }
+                  data-coords={[c, r]}
                   onClick={e => {
                     if (swapping) {
                       dispatch({ type: 'SWAP_WITH', payload: { row: r, column: c } });

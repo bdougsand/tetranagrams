@@ -76,8 +76,9 @@
   padding: 0.2em;
   z-index: 2;
 
-  background-color: lightgray;
+  background-color: #dddddd;
   border: 1px solid white;
+  box-shadow: 2px 2px #ccc inset;
 }
 
 .tile-wrapper.tetromino {
@@ -102,6 +103,10 @@
 
 .board.swapping .tile-wrapper:hover .tile {
   background-color: lightgoldenrodyellow;
+}
+
+.tile-wrapper.drop-target {
+  background-color: #aaaaaa;
 }
 
 .tile {
