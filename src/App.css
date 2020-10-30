@@ -75,6 +75,9 @@
   flex: 0;
   padding: 0.2em;
   z-index: 2;
+
+  background-color: lightgray;
+  border: 1px solid white;
 }
 
 .tile-wrapper.tetromino {
@@ -112,6 +115,8 @@
   border-radius: 5px;
   box-shadow: 2px 2px 3px #aaa;
   user-select: none;
+
+  background-color: white;
 }
 
 .tetromino {

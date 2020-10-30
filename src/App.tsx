@@ -1,26 +1,25 @@
 import * as React from 'react';
-import { useEffect, useRef, useState } from 'react';
 import './App.css';
 
 import { Shapes, TetrominoShape } from './svg';
 
 interface PlacedPieceData {
-    x: number;
-    y: number;
+  x: number;
+  y: number;
 }
 
 interface TileData {
-    id: number;
-    type: 'tile';
-    letter: string;
+  id: number;
+  type: 'tile';
+  letter: string;
 }
 
 type Shape = string[];
 type Coord = [number, number];
 interface TetrominoData {
-    id: number;
-    type: 'tetromino';
-    shape: Shape;
+  id: number;
+  type: 'tetromino';
+  shape: Shape;
 }
 type PieceData = TileData | TetrominoData;
 type PlacedPiece = PieceData & PlacedPieceData;
@@ -28,21 +27,21 @@ type PlacedTile = TileData & PlacedPieceData;
 type PieceId = number;
 
 interface CellData {
-    id: number;
+  id: number;
 };
 
 type BoardState = CellData[][];
-interface GameState {
-    pool: string[];
-    board: BoardState;
-    columns: number;
-    rows: number;
-    selectedColumn: number;
-    _nextId: PieceId;
-    dropping: PieceData;
-    pieces: { [id in PieceId]: PlacedPiece };
+export interface GameState {
+  pool: string[];
+  board: BoardState;
+  columns: number;
+  rows: number;
+  selectedColumn: number;
+  _nextId: PieceId;
+  dropping: PieceData;
+  pieces: { [id in string]: PlacedPiece };
 
-    swapping: PieceId;
+  swapping: PieceId;
 }
 
 // 
@@ -79,11 +78,11 @@ const letters = {
 };
 
 const randomIndex = (pool: any[]) => {
-  return Math.floor(Math.random()*pool.length);
+  return Math.floor(Math.random() * pool.length);
 };
 
 const initGame = (): GameState => {
-  const columns = 4;
+  const columns = 6;
   const rows = 10;
   const pool = Object.keys(letters).reduce((pool, letter) => {
     for (let i = letters[letter]; i > 0; --i)
@@ -100,7 +99,7 @@ const initGame = (): GameState => {
     dropping: null,
     _nextId: 1,
     swapping: null,
-    pieces: { }
+    pieces: {}
   };
 };
 
@@ -115,20 +114,20 @@ const getShapeDimensions = (shape: Shape) => {
 //
 //   ['** ', ' **'],
 // [[0,0], [0, 1], [1,1], [1,2]];
-const pi_2 = Math.PI/2;
-const rotate = (x: number, y: number, steps: number=1) =>
-    ([x * Math.cos(pi_2*steps) - y* Math.sin(pi_2*steps),
-     x*Math.sin(pi_2*steps) + y*Math.cos(pi_2*steps)]);
+const pi_2 = Math.PI / 2;
+const rotate = (x: number, y: number, steps: number = 1) =>
+  ([x * Math.cos(pi_2 * steps) - y * Math.sin(pi_2 * steps),
+  x * Math.sin(pi_2 * steps) + y * Math.cos(pi_2 * steps)]);
 
 /**
  * convert array of strings into an array of relative coordinates, relative to the top left [0,0] of shape, unrotated
  */
-export const getCoordinates = (anchor: Coord, shape: Shape, rotation: number=0): number[][] => {
+export const getCoordinates = (anchor: Coord, shape: Shape, rotation: number = 0): number[][] => {
   const boardCoordinates = [];
-  const yMax = shape.length-1;
+  const yMax = shape.length - 1;
   shape.forEach((str, yIdx) => {
     Array.from(str).forEach((cel, xIdx) => {
-      if (cel !== ' '){
+      if (cel !== ' ') {
         const [x, y] = rotation ? rotate(xIdx, yIdx, rotation) : [xIdx, yIdx];
         boardCoordinates.push([anchor[0] + x, yMax - (anchor[1] + y)]);
       }
@@ -137,6 +136,49 @@ export const getCoordinates = (anchor: Coord, shape: Shape, rotation: number=0):
   return boardCoordinates;
 }
 
+export function getTiles(game: GameState, coords: Coord[]): PlacedPiece[] {
+  return coords.map(([x, y]) => game.pieces[game.board[y][x].id]);
+}
+
+type Direction = [(-1 | 0 | 1), (-1 | 0 | 1)];
+export function traceChain(game: GameState, coord: Coord, dir: Direction): Coord[] {
+  let [x, y] = coord;
+  const [dx, dy] = dir
+  const pieces: Coord[] = []
+
+  if (game.board[y][x] === null) return null;
+
+  while (game.board[y += dy]?.[x += dx]) {
+    pieces.push([x, y])
+  }
+
+  return pieces
+}
+
+export function getTileChains(game: GameState, coord: Coord): PlacedPiece[][] {
+  const dirs: Direction[] = [[1, 0], [0, -1]];
+  const chains: PlacedPiece[][] = [];
+
+  for (const [dx, dy] of dirs) {
+    const tail: Coord[] = traceChain(game, coord, [dx, dy])
+    if (!tail) continue;
+
+    const head: Coord[] = traceChain(game, coord, [-dx, -dy] as Direction)
+    if (head.length + tail.length < 1) continue;
+
+    const chain: Coord[] = [...head.reverse(), coord, ...tail]
+    chains.push(getTiles(game, chain))
+  }
+
+  return chains;
+}
+
+//   const pieces = game.pieces;
+//   const { id: pieceID } = game.board[coord[1]][coord[0]];
+//   const piece = pieces[pieceID];
+
+//   return getTileChains;
+// }
 
 function drawLetter(game: GameState): GameState {
   if (game.dropping || !game.pool.length) {
@@ -145,14 +187,14 @@ function drawLetter(game: GameState): GameState {
 
   const idx = randomIndex(game.pool);
   const letter = game.pool[idx];
-  const pool = game.pool.slice(0, idx).concat(game.pool.slice(idx+1));
-    const id = game._nextId;
+  const pool = game.pool.slice(0, idx).concat(game.pool.slice(idx + 1));
+  const id = game._nextId;
 
   return {
     ...game,
     pool,
     dropping: { id, letter, type: 'tile' },
-    _nextId: game._nextId+1
+    _nextId: game._nextId + 1
   };
 }
 
@@ -160,15 +202,15 @@ const isBlank = (board: BoardState, row: number, column: number): boolean =>
   !(row in board) || !(column in board[row]) || !board[row][column];
 
 function canPlace(board: BoardState, piece: PieceData, coord: Coord): boolean {
-    const coords = piece.type === 'tile' ? [coord] : getCoordinates(coord, piece.shape);
-    for (const [col, row] of coords)
-      if (!isBlank(board, row, col))
-        return false;
-    return true;
+  const coords = piece.type === 'tile' ? [coord] : getCoordinates(coord, piece.shape);
+  for (const [col, row] of coords)
+    if (!isBlank(board, row, col))
+      return false;
+  return true;
 }
 
 function findLanding(board: BoardState, piece: PieceData, column: number): number {
-  let row = board.length-1;
+  let row = board.length - 1;
 
   while (row >= 0) {
     if (!canPlace(board, piece, [column, row]))
@@ -177,7 +219,7 @@ function findLanding(board: BoardState, piece: PieceData, column: number): numbe
     --row;
   }
 
-  return (row+1 >= board.length) ? -1 : row+1;
+  return (row + 1 >= board.length) ? -1 : row + 1;
 }
 
 function dropPiece(game: GameState): GameState {
@@ -202,24 +244,24 @@ function dropPiece(game: GameState): GameState {
     dropping: null,
     pieces: { ...game.pieces, [dropping.id]: piece }
   };
-  
+
   return setPieceCoord(newGame, piece, [selectedColumn, row]);
 }
 
 export function isSupported(game: GameState, pieceId: number): boolean {
   const piece = game.pieces[pieceId];
-  const {x, y} = piece;
+  const { x, y } = piece;
 
   if (y === 0) return true;
   if (piece.type === 'tile') {
-    const below = game.board[y-1]?.[x];
+    const below = game.board[y - 1]?.[x];
     return below ? isSupported(game, below.id) : false;
   } else if (piece.type === 'tetromino') {
     //
-    const coordinates = getCoordinates([x,y], piece.shape);
-    for (let i = 0; i < coordinates.length; i++){
+    const coordinates = getCoordinates([x, y], piece.shape);
+    for (let i = 0; i < coordinates.length; i++) {
       if (y === 0) return true;
-      const below = game.board[y-1]?.[x];
+      const below = game.board[y - 1]?.[x];
       if (!below || piece.id === below.id) continue;
       if (isSupported(game, below.id)) {
         return true
@@ -246,7 +288,7 @@ export function setPieceCoord(game: GameState, piece: PieceData & Partial<Placed
   const newPiece = { ...piece, x: coord[0], y: coord[1] };
   game.pieces[piece.id] = newPiece;
 
-  if (piece.x && piece.y) {
+  if ('x' in piece) {
     for (const [x, y] of getPieceCoordinates(piece as PlacedPiece)) {
       if (game.board[y]?.[x]?.id === piece.id)
         game.board[y][x] = null;
@@ -273,10 +315,10 @@ function gameTick(game: GameState, tick: number) {
     const newGame = {
       ...game,
       board: game.board.map(row => [...row]),
-      pieces: {...game.pieces},
+      pieces: { ...game.pieces },
     };
     for (const piece of unsupported) {
-      setPieceCoord(newGame, piece, [piece.x, piece.y-1]);
+      setPieceCoord(newGame, piece, [piece.x, piece.y - 1]);
     }
 
     return newGame;
@@ -285,17 +327,18 @@ function gameTick(game: GameState, tick: number) {
   return game;
 }
 
-function randItem<T>(xs: T[]): T {
-  return xs[Math.floor(Math.random()*xs.length)];
-}
-
-function dropTetromino(game: GameState, shape: Shape=randItem(Shapes)) {
+function dropTetromino(game: GameState, shape: Shape = randItem(Shapes)) {
   return dropPiece({
     ...game,
     dropping: { id: game._nextId, type: 'tetromino', shape },
-    _nextId: game._nextId+1
+    _nextId: game._nextId + 1
   });
 }
+
+function randItem<T>(xs: T[]): T {
+  return xs[Math.floor(Math.random() * xs.length)];
+}
+
 
 function swapPiece(game: GameState, dest: Coord) {
   const [col, row] = dest;
@@ -305,10 +348,10 @@ function swapPiece(game: GameState, dest: Coord) {
   if (!canPlace(newBoard, piece, dest))
     return game;
 
-  let newGame = setPieceCoord({ 
+  let newGame = setPieceCoord({
     ...game,
     board: newBoard,
-    pieces: {...game.pieces},
+    pieces: { ...game.pieces },
     swapping: null,
   }, piece, dest);
 
@@ -327,96 +370,96 @@ const gameReducer = (game: GameState, action: { type: string, payload?: any }) =
         selectedColumn: action.payload.column
       };
 
-  case 'TICK':
-    return gameTick(game, action.payload);
+    case 'TICK':
+      return gameTick(game, action.payload);
 
-  case 'DRAW_LETTER':
-    return drawLetter(game);
+    case 'DRAW_LETTER':
+      return drawLetter(game);
 
-  case 'DROP_LETTER':
-    return dropPiece(game);
+    case 'DROP_LETTER':
+      return dropPiece(game);
 
-  case 'DRAW_N_DROP': {
-    return ['DRAW_LETTER', 'DROP_LETTER'].map(type => ({ type })).reduce(gameReducer, game);
-  }
+    case 'DRAW_N_DROP': {
+      return ['DRAW_LETTER', 'DROP_LETTER'].map(type => ({ type })).reduce(gameReducer, game);
+    }
 
-  case 'DROP_TET': {
-    return dropTetromino(game);
-  }
+    case 'DROP_TET': {
+      return dropTetromino(game);
+    }
 
-  case 'START_SWAPPING': {
-    return {
-      ...game,
-      swapping: action.payload.id
-    };
-  }
+    case 'START_SWAPPING': {
+      return {
+        ...game,
+        swapping: action.payload.id
+      };
+    }
 
-  case 'SWAP_WITH': {
-    return swapPiece(game, [action.payload.column, action.payload.row]);
-  }
+    case 'SWAP_WITH': {
+      return swapPiece(game, [action.payload.column, action.payload.row]);
+    }
 
     default:
       return game;
   }
 };
 
-const Tile: React.FC<{ tile: TileData }> = ({tile}) =>
+const Tile: React.FC<{ tile: TileData }> = ({ tile }) =>
   <div className="tile">{tile.letter}</div>;
 
 type BoardProps = {
-    game: GameState,
-    TileComponent?: React.ComponentType<{ tile: PlacedTile }>,
-    dispatch: React.Dispatch<any>,
+  game: GameState,
+  TileComponent?: React.ComponentType<{ tile: PlacedTile }>,
+  dispatch: React.Dispatch<any>,
 };
 
 const Board: React.FC<BoardProps> =
   ({ game, TileComponent = Tile, dispatch }) => {
-  const { board: data, columns, rows, selectedColumn, swapping } = game;
-  const renderedIds = {};
-  return (
-  <div className={"board" + (swapping ? ' swapping' : '')}>
-    {new Array(columns).fill(1).map((_, i) => (
-      <div className={'column-header ' + (i === selectedColumn ? 'selected' : '')}
+    const { board: data, columns, rows, selectedColumn, swapping } = game;
+    const renderedIds = {};
+    return (
+      <div className={"board" + (swapping ? ' swapping' : '')}>
+        {new Array(columns).fill(1).map((_, i) => (
+          <div className={'column-header ' + (i === selectedColumn ? 'selected' : '')}
             onClick={() => { dispatch({ type: 'SELECT_COLUMN', payload: { column: i } }) }}
-        />
-    ))}
-    {data.map((row, r) => {
-      return (
-          row.map((tile, c) => {
-            const id = tile?.id;
-            if (id) {
-              if (renderedIds[id])
-                return null;
+          />
+        ))}
+        {data.map((row, r) => {
+          return (
+            row.map((tile, c) => {
+              const id = tile?.id;
+              if (id) {
+                // if (renderedIds[id])
+                //   return null;
 
-              renderedIds[id] = true;
-            }
+                renderedIds[id] = true;
+              }
 
-            const blank = !tile;
-            const piece = tile && game.pieces[id];
-            const tetro = piece?.type === 'tetromino' && piece.shape;
-            const row = rows-r+1;
+              const blank = !tile;
+              const piece = tile && game.pieces[id];
+              const tetro = piece?.type === 'tetromino' && piece.shape;
+              const row = rows - r + 1;
 
-            const style = {
-              gridColumnStart: c+1,
-              gridRowStart: row
-            };
-            let tetroClasses = '';
+              const style = {
+                gridColumnStart: c + 1,
+                gridRowStart: row
+              };
+              let tetroClasses = '';
 
-            if (tetro) {
-              const [w, h] = getShapeDimensions(tetro);
-              Object.assign(style, {
-                gridColumnEnd: c+1+w,
-                gridRowStart: row-(h-1),
-                gridRowEnd: row+1,
-              });
+              if (tetro) {
+                const [w, h] = getShapeDimensions(tetro);
+                Object.assign(style, {
+                  gridColumnEnd: c + 1 + w,
+                  gridRowStart: row - (h - 1),
+                  gridRowEnd: row + 1,
+                });
 
-              tetroClasses = w > h ? 'wide' : 'tall';
-            }
+                tetroClasses = w > h ? 'wide' : 'tall';
+              }
 
-            return (
-              <div className={"tile-wrapper" + (blank ? ' blank' : '') +
-                              (swapping === id ? ' swapping-tile' : '') +
-                              (tetro ? ' tetromino' : '')}
+              return (
+                <div className={"tile-wrapper" + (blank ? ' blank' : '') +
+                  (swapping === id ? ' swapping-tile' : '') +
+                  (tetro ? ' tetromino' : '')}
                   onClick={e => {
                     if (swapping) {
                       dispatch({ type: 'SWAP_WITH', payload: { row: r, column: c } });
@@ -424,81 +467,42 @@ const Board: React.FC<BoardProps> =
                       dispatch({ type: 'START_SWAPPING', payload: { id } });
                     }
                   }}
-                   style={style}
-                   key={id || `${c}-${r}`} >
-                {blank ? null :
-                 tetro ? <TetrominoShape shape={tetro}
-                                         className={`tetromino ${tetroClasses}`}
-                        /> :
-                 <TileComponent tile={piece as PlacedTile}/>}
-              </div>
-            );
-          })
-      );
-    })}
-  </div>
-  );
-};
-
-const useGameTick = (ms, dispatch: React.Dispatch<any>, scale=1) => {
-  const state = useRef(null);
-
-  useEffect(() => {
-    if (state.current) {
-      const { interval } = state.current;
-      if (interval) {
-        clearTimeout(interval);
-      }
-    }
-
-    const interval = setInterval(() => {
-      dispatch({
-        type: 'TICK',
-        payload: {
-          delta: (Date.now() - state.current.last)*state.current.scale,
-          tick: state.current.tick++,
-        }
-      });
-
-      state.current.last = Date.now();
-    }, ms);
-
-    state.current = {
-      interval,
-      last: Date.now(),
-      scale,
-      tick: 0
-    };
-
-    return () => {
-      console.log('cleaning up');
-      clearTimeout(state.current.interval);
-      state.current = null;
-    };
-  }, [ms, dispatch, scale]);
-
-  useEffect(() => {
-    if (state.current)
-      state.current.scale = scale;
-
-  }, [scale]);
-};
+                  style={style}
+                  key={id || `${c}-${r}`} >
+                  {blank ? null :
+                    tetro ? <TetrominoShape shape={tetro}
+                      className={`tetromino ${tetroClasses}`}
+                    /> :
+                      <TileComponent tile={piece as PlacedTile} />}
+                </div>
+              );
+            })
+          );
+        })}
+      </div>
+    );
+  };
 
 
 function App() {
   // pieces: move one at a time,
   const [game, dispatch] = React.useReducer(gameReducer, null, initGame);
-  const [shape, setShape] = useState(0);
-  useGameTick(500, dispatch);
+
+  const swapping = game.pieces[game.swapping];
+  const words = swapping && getTileChains(game, [swapping.x, swapping.y]).map(
+    chain => chain.map(tile => tile.type === 'tile' ? tile.letter : '').join('')
+  );
 
   return (
     <div className="App">
       <div>{game.pool.length} letter(s) remaining in the pool</div>
-      <Board game={game} dispatch={dispatch}/>
+      <Board game={game} dispatch={dispatch} />
       <button onClick={() => dispatch({ type: 'DRAW_N_DROP' })}>
         Draw 'n' Drop
       </button>
-
+    {words && <div>
+        {words.map((word, i) => <div key={i}>{word}</div>)}
+      </div>}
       {/* <button onClick={() => dispatch({ type: 'DROP_TET' })}>
         Drop Tetromino
       </button> */}
