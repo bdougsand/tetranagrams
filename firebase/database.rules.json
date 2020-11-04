@@ -1,0 +1,47 @@
+{
+  /* Visit https://firebase.google.com/docs/database/security to learn more about security rules. */
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "games": {
+      "$gameId": {
+        ".write": "!data.exists() && newData.hasChildren(['config', 'meta'])",
+        ".read": true,
+        "meta": {
+          "owner": {
+            ".validate": "newData.val() === auth.uid"
+          },
+          "created": {
+            ".validate": "newData.val() === now"
+          },
+          "$other": {
+            ".write": false
+          }
+        },
+        "config": {
+          ".write": "(data.exists() ? data.parent().child('meta/owner').val() : newData.parent().child('meta/owner').val()) === auth.uid",
+          ".validate": "newData.hasChildren(['seed'])",
+          "seed": {
+            ".validate": "newData.isString()"
+          }
+        },
+        "events": {
+          "$eventId": {
+            ".read": true,
+            ".write": "(!data.exists() && newData.hasChildren(['sender', 'timestamp'])) || (!newData.exists() && data.parent().child('meta/owner').val() === auth.uid)",
+            "sender": {
+              ".validate": "newData.val() === auth.uid"
+            },
+            "timestamp": {
+              ".validate": "newData.val() === now"
+            }
+          }
+        },
+
+        "$other": {
+          ".write": false
+        }
+      }
+    }
+  }
+}
