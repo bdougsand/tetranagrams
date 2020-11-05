@@ -15,7 +15,11 @@
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
-    ]
+    ],
+    "predeploy": [
+      "rm -rf ./public && yarn --cwd .. build && mv ../build ./public"
+    ],
+    "rewrites": []
   },
   "emulators": {
     "auth": {
