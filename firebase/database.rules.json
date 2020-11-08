@@ -34,6 +34,9 @@
             },
             "timestamp": {
               ".validate": "newData.val() === now"
+            },
+            "reId": {
+              ".validate": "newDate.isNumber()"
             }
           }
         },

@@ -4,7 +4,7 @@ import seedrandom from 'seedrandom';
 import firebaseConfig from './firebaseConfig'
 
 
-interface CreateGameOptions {};
+export interface CreateGameOptions {};
 
 interface JoinGameOptions {
   id: string;
@@ -15,6 +15,8 @@ export interface EventMessage<T=any> {
   sender: string;
   timestamp: number;
   payload: T;
+  /** Indicates that this message is a reply to a previous message */
+  reId?: number;
 };
 
 interface GameConfig {
@@ -55,19 +57,30 @@ class Server {
   rand: seedrandom.prng;
   gameOptions: GameOptions;
 
-  /** Number of the last event on the server */
+  /** Id of the last event on the server */
   lastKey = 0;
 
-  /** Number of the last event to be processed */
+  /** Id of the last event to be processed */
   lastProcessed = 0;
 
+  /** Timestamp of the last processed event */
   lastTimestamp = 0;
+
+  /** Last used id when the game is first loaded */
+  startingId = 0;
+
+  /** Response messages waiting to be queued */
+  responses = new Map<number, any>();
 
   ready: Promise<boolean>;
   cred: firebase.auth.UserCredential;
 
+  /** Received messages that are waiting to be processed */
   pendingMessages = new Map<number, any>();
   handler: EventHandler;
+
+  _gameReady: Promise<boolean>;
+  _resolveGameReady: (x: any) => any;
 
   get owner() {
     return this.gameOptions.meta.owner;
@@ -75,6 +88,22 @@ class Server {
 
   get userId() {
     return this.auth.currentUser?.uid;
+  }
+
+  get gameReady() {
+    // This will have issues with multiple games
+    if (!this._gameReady) {
+      this._gameReady = new Promise(resolve => {
+        this._resolveGameReady = resolve;
+      });
+    }
+
+    return this._gameReady;
+  }
+
+  resolveGameReady() {
+    this.gameReady;
+    this._resolveGameReady(true);
   }
 
   constructor(options: Partial<ServerOptions> = {}) {
@@ -117,15 +146,16 @@ class Server {
   });
 
   async startListening() {
-    const [meta, config, lastEvent] =
-      await Promise.all([
-        this.getOnce('meta'),
-        this.getOnce('config'),
-        dbOnce(this.ref.child('events').orderByKey().limitToLast(1)),
-      ]) as [GameMeta, GameConfig, firebase.database.DataSnapshot] ;
+    const promises = Promise.all([
+      this.getOnce('meta'),
+      this.getOnce('config'),
+      dbOnce(this.ref.child('events').orderByKey().limitToLast(1)),
+    ]);
+    const [meta, config, lastEvent] = await promises as [GameMeta, GameConfig, firebase.database.DataSnapshot];
+    this.resolveGameReady();
 
     this.gameOptions = { meta, config };
-    this.lastKey = parseInt(lastEvent.key);
+    this.startingId = this.lastKey = parseInt(lastEvent.key);
     this.configWasChanged();
 
     this.ref.child('config').on('value', this.onConfigChanged, this);
@@ -151,14 +181,15 @@ class Server {
   onEventAdded(snap: firebase.database.DataSnapshot, prevChildKey?: string) {
     const k = snap.key;
     const n = parseInt(k);
-    const event = Object.assign(snap.val(), { id: n });
+    const event = Object.assign(snap.val(), { id: n }) as EventMessage;
 
-    if (n - this.lastKey > 1) {
+    this.lastKey = Math.max(this.lastKey, n);
+
+    if (n - this.lastProcessed > 1) {
       // If it's a non-consecutive message, pop it on the pending queue
       this.pendingMessages.set(n, event);
     } else {
       this.processMessage(event);
-      this.lastKey = n;
       this.processPending();
     }
   }
@@ -166,16 +197,29 @@ class Server {
   /**
    * Process messages that were received prematurely
    */
-  processPending() {
+  async processPending() {
     while (true) {
       const n = this.lastProcessed + 1;
       const event = this.pendingMessages.get(n);
       if (!event)
         break;
 
-      this.processMessage(event);
-      this.lastProcessed = n;
+      await this.processMessage(event);
     }
+
+    await this.sendQueuedResponses();
+  }
+
+  async sendQueuedResponses() {
+    for (const [reId, payload] of this.responses.entries()) {
+      try {
+        await this.send(payload, reId);
+      } catch (err) {
+        console.error('Error sending response to message', reId, 'payload', payload);
+      }
+    }
+
+    this.responses.clear();
   }
 
   async processMessage(event: EventMessage) {
@@ -189,15 +233,22 @@ class Server {
       if (result.then) await result;
     } catch (e) {
       // TODO As the need arises, introduce error types that can send messages back to the server
+    } finally {
+      this.lastTimestamp = event.timestamp;
+      this.lastProcessed = event.id;
+
+      // Remove the pending response
+      if (event.reId && event.sender === this.userId)
+        this.responses.delete(event.reId);
     }
   }
 
-  onCancel(error: Error) {
+  onCancel(_error: Error) {
 
   }
 
   /// Public methods
-  async createGame(options: CreateGameOptions) {
+  async createGame(_options: CreateGameOptions = {}) {
     // const seed = Math.
     const seed = Math.random().toString(32) + Date.now().toString(32);
     this.ref = await this.db.ref('games').push({
@@ -209,7 +260,7 @@ class Server {
         seed
       }
     });
-    this.startListening();
+    await this.startListening();
   }
 
   async updateConfig(config: Partial<GameConfig>) {
@@ -219,20 +270,34 @@ class Server {
     return await this.ref.child('config').update(config);
   }
 
-  joinGame(options: JoinGameOptions) {
+  async joinGame(options: JoinGameOptions) {
     this.ref = this.db.ref(`games/${options.id}`);
-    this.startListening();
+    await this.startListening();
   }
 
-  async send() {
+  async send(payload: any, reId: number = null) {
+    await this.gameReady;
+    const data: any = {
+      sender: this.auth.currentUser?.uid,
+      timestamp: firebase.database.ServerValue.TIMESTAMP,
+      payload
+    };
+
+    if (reId) {
+      if (this.startingId > this.lastProcessed) {
+        this.responses.set(reId, payload);
+        return;
+      }
+
+      data.reId = reId;
+    }
+
+    // Find the next unused id
     let n = this.lastKey + 1;
 
     while (true) {
       try {
-        await this.ref.child(`events/${n}`).set({
-          sender: this.auth.currentUser?.uid,
-          timestamp: firebase.database.ServerValue.TIMESTAMP
-        });
+        await this.ref.child(`events/${n}`).set(data);
         break;
       } catch (e) {
         n++

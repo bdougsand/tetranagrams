@@ -1,18 +1,51 @@
-import seedrandom from 'seedrandom';
-
 import Server, { EventMessage } from "./server";
+import { nextKey } from './util';
 
 // playerBoard- [ [3,6]: "b", [7,8]: null, [18,6]: "u"]
-
 interface PlayerData {
   name: string;
   board?: any;
 }
 
 type PregamePhase = { state: 'pregame' };
-type BananagramsPhase = { state: 'bananagrams', started: number, poolDrained?: number };
+type BananagramsPhase = {
+  state: 'bananagrams',
+  started: number,
+  /** Timestamp when the pool was drained */
+  poolDrained?: number
+};
 type BattleshipPhase = { state: 'battleship', turn: string };
 type GamePhase = PregamePhase | BananagramsPhase | BattleshipPhase;
+
+// Local game state ///////////////////////////////////////////////////////////
+export interface PlacedPieceData {
+  x: number;
+  y: number;
+}
+
+export interface TileData {
+  id: number;
+  type: 'tile';
+  letter: string;
+}
+
+export type Shape = string[];
+export type Coord = [number, number];
+export interface TetrominoData {
+  id: number;
+  type: 'tetromino';
+  shape: Shape;
+}
+export type PieceData = TileData | TetrominoData;
+export type PlacedPiece = PieceData & PlacedPieceData;
+export type PlacedTile = TileData & PlacedPieceData;
+export type PieceId = number;
+
+export interface CellData {
+  id: number;
+};
+
+export type BoardState = CellData[][];
 
 export interface SharedGameState {
   /** Optional name for the game */
@@ -20,15 +53,41 @@ export interface SharedGameState {
   ownerId: string;
   players: Map<string, PlayerData>; // added in the order they joined (includes local player)
   phase: GamePhase;
-  myId: string;
-  myLetters: string[];
   pool: string[];
   columns: number;
   rows: number;
   rand: seedrandom.prng;
+
+  // These values will be different across clients
+  myId: string;
+  myLetters: PieceData[];
+
+  // NOTE Should error messages also go here? Just the ones initiated by the
+  // current player? All of them? Do they get cleaned up at some point?
+  // Alternatively, events could return a wrapper that has `state`, `error`, and
+  // `response` fields (and potentially others).
+
+  // This could be used to check locally if a move will be allowed or not.
+
+  // Local state
+
+  /** The current layout of the local player's board */
+  board: BoardState;
+  pieces: { [id in string]: (PlacedPiece|PieceData) };
+  _nextId: PieceId;
 }
 
-// 
+export interface ActionResult<S extends SharedGameState = SharedGameState> {
+  /**
+    * The new state after applying the event action. If there are any changes,
+    * it will be a new object.
+    */
+  state: S;
+  /** Set if the action is invalid */
+  error?: any;
+  /** Could be used to send a reply */
+  response?: any;
+}
 
 //https://hasbro-new.custhelp.com/app/answers/detail/a_id/19/~/how-many-of-each-letter-tile-are-included-in-a-scrabble-game%3F
 const letters = {
@@ -65,8 +124,16 @@ const randomIndex = (pool: any[], rand=Math.random) => {
   return Math.floor(rand() * pool.length);
 };
 
-const initGame = (event: EventMessage<InitPayload>, myId: string): SharedGameState => {
-  const { columns = 6, rows = 10, seed, name = '', ownerName } = event.payload;
+const initBoard = (rows: number, cols: number): BoardState =>
+  Array(rows).fill(null).map(() => Array(cols).fill(null));
+
+export type ClientParams = Pick<Server, 'userId' | 'rand' | 'owner'>;
+type ActionFn<T = EventPayload, S extends SharedGameState = SharedGameState> =
+  (state: S, event: EventMessage<T>, params: ClientParams) => ActionResult<S>;
+
+const initGame: ActionFn<InitPayload> = (_, event, server) => {
+  const myId = server.userId;
+  const { columns = 6, rows = 10, name = '', ownerName } = event.payload;
   const pool = Object.keys(letters).reduce((pool, letter) => {
     for (let i = letters[letter]; i > 0; --i)
       pool.push(letter);
@@ -81,37 +148,54 @@ const initGame = (event: EventMessage<InitPayload>, myId: string): SharedGameSta
     pool,
     rows,
     columns,
-    rand: seedrandom(seed),
+    rand: server.rand,
 
     // These values will be different across clients
     myId,
-    myLetters: []
+    myLetters: [],
+
+    board: initBoard(columns, rows),
+    pieces: {},
+    _nextId: 1,
   };
 
-  return joinGame(state, event.sender, { name: ownerName });
+  return _joinGame(state, event.sender, { name: ownerName });
 };
 
-function joinGame(state: SharedGameState, userId: string, options: { name: string }): SharedGameState {
+function _joinGame(state: SharedGameState, userId: string, options: { name: string }): ActionResult {
   if (state.phase.state !== 'pregame')
-    return state;
+    return {
+      state,
+      error: "You can't join the game now!"
+    };
+
+  if (state.players.has(userId))
+    return {
+      state,
+      error: "You're already in the game"
+    };
 
   const players = new Map(state.players);
   players.set(userId, options);
 
   return {
-    ...state,
-    players
+    state: {
+      ...state,
+      players
+    }
   };
 }
 
-function leaveGame(state: SharedGameState) {
+const joinGame: ActionFn<JoinPayload> = (state, event) => (_joinGame(state, event.sender, { name: event.payload.name }));
+
+const leaveGame: ActionFn<LeavePayload> = (state, event) => {
   // TODO
-  return state;
+  return { state };
 }
 
 /**
- * Helper function that modifies the state in place. Be sure to copy 'myLetters'
- * and 'pool' if building a new state.
+ * Helper function that modifies the state in place. Be sure to copy 'myLetters',
+ * 'pool', and '_nextId' if building a new state.
  */
 function _drawLetter(state: SharedGameState, userId: string): SharedGameState {
   if (!state.pool.length)
@@ -120,34 +204,45 @@ function _drawLetter(state: SharedGameState, userId: string): SharedGameState {
   const idx = randomIndex(state.pool, state.rand);
   const [letter] = state.pool.splice(idx, 1);
 
-  if (userId === state.myId)
-    state.myLetters.push(letter);
+  if (userId === state.myId) {
+    const piece: PieceData = { type: 'tile', letter, id: state._nextId++ };
+    state.myLetters.push(piece);
+    state.pieces[piece.id] = piece;
+  }
 
   return state;
 }
 
 function _drawLetters(state: SharedGameState, n = 1): SharedGameState {
-  state.players.forEach((_, userId) => {
-    for (let i = n; i > 0; -i) {
+  for (let i = n; i > 0; i--) {
+    for (const userId of state.players.keys()) {
       _drawLetter(state, userId);
+      if (!state.pool.length)
+        return state;
     }
-  });
+  }
   return state;
 }
 
 const StartingLetters = 15;
 
-function startGame(state: SharedGameState, timestamp: number): SharedGameState {
+const startGame: ActionFn<StartPayload> = (state, { timestamp }) => {
   if (state.players.size < 2 || state.phase.state !== 'pregame')
-    return state;
+    return {
+      state,
+      error: "You must have at least two players to start the game"
+    };
 
-  return _drawLetters({
-    ...state,
-    phase: { state: 'bananagrams', started: timestamp },
-    myLetters: [...state.myLetters],
-    pool: [...state.pool]
-  }, StartingLetters);
-}
+  return {
+    state: _drawLetters({
+      ...state,
+      _nextId: state._nextId,
+      phase: { state: 'bananagrams', started: timestamp },
+      myLetters: [...state.myLetters],
+      pool: [...state.pool]
+    }, StartingLetters)
+  };
+};
 
 // gets a server as argument
 // init -- whenever sent by owner, initialize rng
@@ -159,92 +254,111 @@ function startGame(state: SharedGameState, timestamp: number): SharedGameState {
 // access to random function
 // on a turn - guess a tile, guess a word, then set turn to next person
 
-function draw(state: SharedGameState, event: EventMessage<DrawPayload>): SharedGameState {
+const draw: ActionFn<DrawPayload> = (state, event) => {
+  const phase = state.phase as BananagramsPhase;
   const newState = _drawLetters({
     ...state,
     myLetters: [...state.myLetters],
     pool: [...state.pool],
   });
 
-  if (!newState.pool.length)
-    newState.phase = { ...(newState.phase as BananagramsPhase),
-                       poolDrained: event.timestamp };
+  newState.phase = newState.pool.length ? phase : { ...phase, poolDrained:
+                                                    event.timestamp };
 
-  return newState;
+  return { state: newState };
+};
+
+const guess: ActionFn<GuessPayload> = (state, event) => {
+  const phase = state.phase as BattleshipPhase;
+
+  if (phase.turn !== event.sender)
+    return {
+      state,
+      error: "It's not your turn"
+    };
+
+  // Update the turn
+  return {
+    state: {
+      ...state,
+      phase: { ...phase, turn: nextKey(state.players, event.sender) }
+    }
+  };
+};
+
+const answer: ActionFn<AnswerPayload> = (state, event) => {
+  // TODO Record the information revealed about the sender's board
+  return { state };
 }
 
-type InitPayload = {
+export type InitPayload = {
   type: 'init',
-  seed: string,
-  columns: number,
-  rows: number,
-  name: string,
+  columns?: number,
+  rows?: number,
+  name?: string,
   ownerName: string
 };
 type StartPayload = { type: 'start', };
 type JoinPayload = { type: 'join', name: string };
 type LeavePayload = { type: 'leave' };
 type DrawPayload = { type: 'draw' };
-type GuessPayload = { type: 'guess', coord: [number, number] };
+type GuessPayload = { type: 'guess', targetId: string, coord: [number, number] };
 type AnswerPayload = { type: 'answer', coord: [number, number], replyId: number };
 
-type EventPayload =
-  InitPayload |
-  JoinPayload |
-  LeavePayload |
-  StartPayload |
-  DrawPayload |
-  GuessPayload |
-  AnswerPayload;
+export type EventPayload =
+  InitPayload
+  | JoinPayload
+  | LeavePayload
+  | StartPayload
+  | DrawPayload
+  | GuessPayload
+  | AnswerPayload;
 
-export function sharedGameStateReducer(state: SharedGameState, event: EventMessage, server: Server): SharedGameState {
-  const payload: EventPayload = event.payload;
+type ActionFnWrapper<ExtraArgs extends any[] = []> = (fn: ActionFn, ...rest: ExtraArgs) => ActionFn;
 
-  if (event.sender !== server.owner) {
-    /// These events can only be sent by the game owner
-    if (payload.type === 'init')
-      return initGame(event, server.userId);
+const _owner: ActionFnWrapper = (fn) => (
+  (state, event, server) => (
+    event.sender !== server.owner
+      ? { state, error: "Permission denied" }
+      : fn(state, event, server)));
 
-    if (payload.type === 'start') {
-      return startGame(state, event.timestamp);
-    }
+const _inGame: ActionFnWrapper = fn => (
+  (state, event, server) => (
+    !state.players.has(event.sender)
+      ? { state, error: "You haven't joined the game" }
+      : fn(state, event, server)));
+
+const _inPhase: ActionFnWrapper<[GamePhase["state"]]> = (fn, phase) => (
+  (state, event, server) => (
+    state.phase.state !== phase
+      ? { state, error: `` }
+      : fn(state, event, server)));
+
+export const EventHandlers: { [k in EventPayload["type"]]: ActionFn } = {
+  'init': _owner(initGame),
+  'start': _owner(startGame),
+  'join': joinGame,
+  'leave': _inGame(leaveGame),
+  'draw': _inPhase(draw, 'bananagrams'),
+  'guess': _inPhase(guess, 'battleship'),
+  'answer': _inPhase(answer, 'battleship'),
+};
+
+
+/**
+ * Process the result of an event message
+ */
+export const handleMessage: ActionFn<EventPayload> =
+  (state, event, server) => {
+  const payload = event.payload;
+  const handler = EventHandlers[payload.type];
+
+  if (handler) {
+    return handler(state, event, server);
   }
 
-  if (payload.type === 'join') {
-    return joinGame(state, event.sender, { name: payload.name });
-  }
-
-  if (state.players.has(event.sender)) {
-    /// These events can only be sent by players who have joined the game
-    if (payload.type === 'leave') {
-      return leaveGame(state);
-    }
-
-    const { phase } = state;
-    if (phase.state === 'bananagrams') {
-      /// Events valid during the bananagrams phase
-
-      return draw(state, event);
-    } else if (phase.state === 'battleship') {
-      /// Events valid during the battleship phase
-
-      // answer
-
-      if (phase.turn === event.sender) {
-        // Events valid on the sending player's turn
-
-        // guess
-      }
-    }
-  }
-
-  return state;
-  // payload
-  // type
-  // should ignore? (based on current state)
-  // 
-  // sender
-  // id
-  // (timestamp)
-
+  return {
+    state,
+    error: `Unrecognized action: ${payload.type}`
+  };
 }
