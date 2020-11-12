@@ -149,3 +149,19 @@
 .tetromino * {
     pointer-events: painted;
 }
+
+form {
+  display: flex;
+  flex-direction: column;
+  width: 500px;
+}
+
+.tile-tray {
+  display: flex;
+  flex-direction: row;
+}
+
+.tile-tray .tile {
+  height: 4em;
+  width: 4em;
+}

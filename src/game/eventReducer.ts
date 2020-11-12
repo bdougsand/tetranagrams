@@ -50,6 +50,7 @@ export type BoardState = CellData[][];
 export interface SharedGameState {
   /** Optional name for the game */
   name: string;
+  gameId: string;
   ownerId: string;
   players: Map<string, PlayerData>; // added in the order they joined (includes local player)
   phase: GamePhase;
@@ -60,7 +61,7 @@ export interface SharedGameState {
 
   // These values will be different across clients
   myId: string;
-  myLetters: PieceData[];
+  trayTiles: CellData[];
 
   // NOTE Should error messages also go here? Just the ones initiated by the
   // current player? All of them? Do they get cleaned up at some point?
@@ -127,12 +128,13 @@ const randomIndex = (pool: any[], rand=Math.random) => {
 const initBoard = (rows: number, cols: number): BoardState =>
   Array(rows).fill(null).map(() => Array(cols).fill(null));
 
-export type ClientParams = Pick<Server, 'userId' | 'rand' | 'owner'>;
+export type ClientParams = Pick<Server, 'userId' | 'rand' | 'owner' | 'gameId'>;
 type ActionFn<T = EventPayload, S extends SharedGameState = SharedGameState> =
   (state: S, event: EventMessage<T>, params: ClientParams) => ActionResult<S>;
 
 const initGame: ActionFn<InitPayload> = (_, event, server) => {
   const myId = server.userId;
+  
   const { columns = 6, rows = 10, name = '', ownerName } = event.payload;
   const pool = Object.keys(letters).reduce((pool, letter) => {
     for (let i = letters[letter]; i > 0; --i)
@@ -142,6 +144,7 @@ const initGame: ActionFn<InitPayload> = (_, event, server) => {
 
   const state: SharedGameState = {
     name,
+    gameId: server.gameId,
     ownerId: event.sender,
     players: new Map(),
     phase: { state: 'pregame' },
@@ -152,7 +155,7 @@ const initGame: ActionFn<InitPayload> = (_, event, server) => {
 
     // These values will be different across clients
     myId,
-    myLetters: [],
+    trayTiles: [],
 
     board: initBoard(columns, rows),
     pieces: {},
@@ -194,7 +197,7 @@ const leaveGame: ActionFn<LeavePayload> = (state, event) => {
 }
 
 /**
- * Helper function that modifies the state in place. Be sure to copy 'myLetters',
+ * Helper function that modifies the state in place. Be sure to copy 'trayTiles',
  * 'pool', and '_nextId' if building a new state.
  */
 function _drawLetter(state: SharedGameState, userId: string): SharedGameState {
@@ -206,7 +209,7 @@ function _drawLetter(state: SharedGameState, userId: string): SharedGameState {
 
   if (userId === state.myId) {
     const piece: PieceData = { type: 'tile', letter, id: state._nextId++ };
-    state.myLetters.push(piece);
+    state.trayTiles.push({ id: piece.id });
     state.pieces[piece.id] = piece;
   }
 
@@ -238,7 +241,7 @@ const startGame: ActionFn<StartPayload> = (state, { timestamp }) => {
       ...state,
       _nextId: state._nextId,
       phase: { state: 'bananagrams', started: timestamp },
-      myLetters: [...state.myLetters],
+      trayTiles: [...state.trayTiles],
       pool: [...state.pool]
     }, StartingLetters)
   };
@@ -258,7 +261,8 @@ const draw: ActionFn<DrawPayload> = (state, event) => {
   const phase = state.phase as BananagramsPhase;
   const newState = _drawLetters({
     ...state,
-    myLetters: [...state.myLetters],
+    _nextId: state._nextId,
+    trayTiles: [...state.trayTiles],
     pool: [...state.pool],
   });
 

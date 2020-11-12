@@ -1,8 +1,6 @@
 import firebase from 'firebase';
 import seedrandom from 'seedrandom';
-
-import firebaseConfig from './firebaseConfig'
-
+import App from './firebase';
 
 export interface CreateGameOptions {};
 
@@ -49,7 +47,6 @@ const dbOnce = (query: firebase.database.Query): Promise<firebase.database.DataS
   });
 
 class Server {
-  app = firebase.initializeApp(firebaseConfig);
   auth: firebase.auth.Auth;
   db: firebase.database.Database;
 
@@ -90,6 +87,10 @@ class Server {
     return this.auth.currentUser?.uid;
   }
 
+  get gameId() {
+    return this.ref.key;
+  }
+
   get gameReady() {
     // This will have issues with multiple games
     if (!this._gameReady) {
@@ -102,6 +103,7 @@ class Server {
   }
 
   resolveGameReady() {
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
     this.gameReady;
     this._resolveGameReady(true);
   }
@@ -118,8 +120,8 @@ class Server {
       this.auth.useEmulator('http://localhost:9099');
       this.db.useEmulator('localhost', 9000);
     } else {
-      this.auth = this.app.auth();
-      this.db = this.app.database();
+      this.auth = App.auth();
+      this.db = App.database();
     }
 
     if (options.handler)
@@ -155,7 +157,13 @@ class Server {
     this.resolveGameReady();
 
     this.gameOptions = { meta, config };
-    this.startingId = this.lastKey = parseInt(lastEvent.key);
+    
+  {
+    const val = lastEvent.val();
+    if (val) {
+      this.startingId = this.lastKey = parseInt(Object.keys(val)[0]);
+    }}
+      
     this.configWasChanged();
 
     this.ref.child('config').on('value', this.onConfigChanged, this);
@@ -300,6 +308,7 @@ class Server {
         await this.ref.child(`events/${n}`).set(data);
         break;
       } catch (e) {
+        console.log(e);
         n++
       }
     }

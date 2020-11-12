@@ -19,6 +19,14 @@ export type JoinAction = {
 
 export type StartAction = { type: 'start' };
 
+export type DropPiece = {
+  type: 'drop_piece',
+  payload: {
+    pieceID: number,
+    coords: [number, number],
+  }
+};
+
 /**
  * An action that originates from the server
  */
@@ -30,13 +38,6 @@ export type ServerAction = {
   }
 }
 
-export type DropPiece = {
-  type: 'drop_piece',
-  payload: {
-    pieceID: number,
-    coords: [number, number],
-  }
-};
 
 export type ActionType =
   CreateAction

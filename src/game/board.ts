@@ -93,31 +93,31 @@ export function swapPiece(game: GameState, dest: Coord, pieceID=game.swapping) {
   return newGame;
 }
 
-export function dropPiece(game: GameState): GameState {
-  const { board, dropping, selectedColumn } = game;
+// export function dropPiece(game: GameState): GameState {
+//   const { board, dropping, selectedColumn } = game;
 
-  if (!dropping) {
-    return game;
-  }
+//   if (!dropping) {
+//     return game;
+//   }
 
-  // debugger;
-  const row = findLanding(board, dropping, selectedColumn);
+//   // debugger;
+//   const row = findLanding(board, dropping, selectedColumn);
 
-  // Game over!
-  if (row < 0)
-    return game;
+//   // Game over!
+//   if (row < 0)
+//     return game;
 
-  const newBoard = board.slice().map(row => row.slice());
-  const piece = { ...dropping, x: selectedColumn, y: row };
-  const newGame = {
-    ...game,
-    board: newBoard,
-    dropping: null,
-    pieces: { ...game.pieces, [dropping.id]: piece }
-  };
+//   const newBoard = board.slice().map(row => row.slice());
+//   const piece = { ...dropping, x: selectedColumn, y: row };
+//   const newGame = {
+//     ...game,
+//     board: newBoard,
+//     dropping: null,
+//     pieces: { ...game.pieces, [dropping.id]: piece }
+//   };
 
-  return setPieceCoord(newGame, piece, [selectedColumn, row]);
-}
+//   return setPieceCoord(newGame, piece, [selectedColumn, row]);
+// }
 
 export function findLanding(board: BoardState, piece: PieceData, column: number): number {
   let row = board.length - 1;
@@ -133,7 +133,7 @@ export function findLanding(board: BoardState, piece: PieceData, column: number)
 }
 
 export function getTiles(game: GameState, coords: Coord[]): PlacedPiece[] {
-  return coords.map(([x, y]) => game.pieces[game.board[y][x].id]);
+  return coords.map(([x, y]) => game.pieces[game.board[y][x].id]) as PlacedPiece[];
 }
 
 type Direction = [(-1 | 0 | 1), (-1 | 0 | 1)];

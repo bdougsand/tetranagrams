@@ -1,4 +1,6 @@
-import { useEffect, useReducer, useRef } from 'react';
+import { Dispatch, useCallback, useEffect, useReducer, useRef } from 'react';
+import * as uuid from 'uuid';
+
 import { ActionType } from './actions';
 import * as actions from './actions';
 import { handleMessage, PieceId, PieceData, Coord, SharedGameState, ActionResult, EventPayload } from './eventReducer';
@@ -9,7 +11,7 @@ import { swapPiece } from './board';
 
 class GameServer extends Server {
   getParams() {
-    return selectKeys(this, ['userId', 'rand', 'owner'])
+    return selectKeys(this, ['userId', 'rand', 'owner', 'gameId'])
   }
 
   /**
@@ -41,9 +43,9 @@ class GameServer extends Server {
 }
 
 export interface GameState extends SharedGameState {
-  dropping: PieceData;
+  // dropping: PieceData;
   // These could be stored outside game state, e.g. in component state
-  selectedColumn: number;
+  // selectedColumn: number;
   swapping: PieceId;
   draggingOver: Coord;
 }
@@ -151,7 +153,7 @@ function initApp(server: GameServer): AppState {
   };
 }
 
-export function useGame() {
+export function useGame(): [AppState, Dispatch<ActionType>] {
   const server = useRef(new GameServer());
   const [game, dispatch] = useReducer(gameReducer, server.current, initApp);
 
@@ -167,5 +169,20 @@ export function useGame() {
     };
   }, [dispatch]);
 
-  return game;
+  // const wrappedDispatch = useCallback((action => {
+  //   const untypedMessage = action as any;
+
+  //   if (untypedMessage.__dispatchId) {
+  //     console.log('Message already sent');
+  //     return;
+  //   }
+
+  //   untypedMessage.__dispatchId = uuid.v4();
+  //   console.log('assigned id:', untypedMessage.__dispatchId);
+
+  //   dispatch(action);
+
+  // }) as typeof dispatch, []);
+
+  return [game, dispatch];
 }
