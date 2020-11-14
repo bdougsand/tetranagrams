@@ -1,12 +1,8 @@
+import { getLetter } from "./board";
 import Server, { EventMessage } from "./server";
 import { nextKey } from './util';
 
 // playerBoard- [ [3,6]: "b", [7,8]: null, [18,6]: "u"]
-interface PlayerData {
-  name: string;
-  board?: any;
-}
-
 type PregamePhase = { state: 'pregame' };
 type BananagramsPhase = {
   state: 'bananagrams',
@@ -78,7 +74,7 @@ export interface SharedGameState {
   _nextId: PieceId;
 }
 
-export interface ActionResult<S extends SharedGameState = SharedGameState> {
+export interface ActionResult<S extends SharedGameState = SharedGameState, T=EventPayload> {
   /**
     * The new state after applying the event action. If there are any changes,
     * it will be a new object.
@@ -87,7 +83,7 @@ export interface ActionResult<S extends SharedGameState = SharedGameState> {
   /** Set if the action is invalid */
   error?: any;
   /** Could be used to send a reply */
-  response?: any;
+  response?: T;
 }
 
 //https://hasbro-new.custhelp.com/app/answers/detail/a_id/19/~/how-many-of-each-letter-tile-are-included-in-a-scrabble-game%3F
@@ -125,8 +121,29 @@ const randomIndex = (pool: any[], rand=Math.random) => {
   return Math.floor(rand() * pool.length);
 };
 
+const getGuess = (state: SharedGameState, targetId: string, coord: Coord): KnownData =>
+  state.players.get(targetId)?.knownBoard.get(coord.join(','));
+
+function updateMap<K, V>(m: Map<K, V>, k: K, fn: (val: V) => V): Map<K, V> {
+  return new Map(m).set(k, fn(m.get(k)));
+}
+
 const initBoard = (rows: number, cols: number): BoardState =>
   Array(rows).fill(null).map(() => Array(cols).fill(null));
+
+type CoordString = string;
+type KnownData = {
+  guesserId: string,
+  letter?: string | null
+};
+type PlayerData = {
+  name: string,
+  knownBoard: Map<CoordString, KnownData>,
+};
+type PlayerOptions = Partial<Pick<PlayerData, 'name'>>;
+
+const initPlayer = (options: PlayerOptions): PlayerData =>
+  ({ name: 'unnamed player', ...options, knownBoard: new Map() })
 
 export type ClientParams = Pick<Server, 'userId' | 'rand' | 'owner' | 'gameId'>;
 type ActionFn<T = EventPayload, S extends SharedGameState = SharedGameState> =
@@ -134,7 +151,7 @@ type ActionFn<T = EventPayload, S extends SharedGameState = SharedGameState> =
 
 const initGame: ActionFn<InitPayload> = (_, event, server) => {
   const myId = server.userId;
-  
+
   const { columns = 6, rows = 10, name = '', ownerName } = event.payload;
   const pool = Object.keys(letters).reduce((pool, letter) => {
     for (let i = letters[letter]; i > 0; --i)
@@ -165,7 +182,7 @@ const initGame: ActionFn<InitPayload> = (_, event, server) => {
   return _joinGame(state, event.sender, { name: ownerName });
 };
 
-function _joinGame(state: SharedGameState, userId: string, options: { name: string }): ActionResult {
+function _joinGame(state: SharedGameState, userId: string, options: PlayerOptions): ActionResult {
   if (state.phase.state !== 'pregame')
     return {
       state,
@@ -179,7 +196,7 @@ function _joinGame(state: SharedGameState, userId: string, options: { name: stri
     };
 
   const players = new Map(state.players);
-  players.set(userId, options);
+  players.set(userId, initPlayer(options));
 
   return {
     state: {
@@ -272,27 +289,92 @@ const draw: ActionFn<DrawPayload> = (state, event) => {
   return { state: newState };
 };
 
+const startBattleship: ActionFn<StartBattleship> = (state, event) => {
+  if (state.pool.length) {
+    return {
+      state,
+      error: "There are still tiles left in the pool!",
+    };
+  }
+
+  // TODO Potentially add a required delay between when the pool is drained and
+  // when the battleship phase can begin
+
+  return {
+    state: {
+      ...state,
+      phase: {
+        state: 'battleship',
+        turn: nextKey(state.players)
+      }
+    }
+  };
+};
+
 const guess: ActionFn<GuessPayload> = (state, event) => {
+  const { sender, payload } = event;
   const phase = state.phase as BattleshipPhase;
 
-  if (phase.turn !== event.sender)
+  if (phase.turn !== sender)
     return {
       state,
       error: "It's not your turn"
     };
 
-  // Update the turn
-  return {
+  const guess = getGuess(state, payload.targetId, payload.coord)
+  if (guess) {
+    return {
+      state,
+      error: "That coordinate has already been guessed"
+    };
+  }
+
+  const coordStr = payload.coord.join(',');
+  const players = updateMap(state.players, payload.targetId,
+                            target => ({
+                              ...target,
+                              knownBoard: new Map(target.knownBoard)
+                                .set(coordStr, { guesserId: event.sender })
+                            }));
+
+  return Object.assign({
     state: {
       ...state,
-      phase: { ...phase, turn: nextKey(state.players, event.sender) }
+      players,
+      phase: {
+        ...phase,
+        // Update the turn
+        turn: nextKey(state.players, sender)
+      }
     }
-  };
+  }, payload.targetId === state.myId && {
+    response: {
+      type: 'answer',
+      coord: payload.coord,
+      answer: getLetter(state, ...payload.coord)
+    } as AnswerPayload
+  });
 };
 
 const answer: ActionFn<AnswerPayload> = (state, event) => {
-  // TODO Record the information revealed about the sender's board
-  return { state };
+  const coordStr = event.payload.coord.join(',');
+
+  const players = updateMap(
+    state.players, event.sender,
+    target => ({
+      ...target,
+      knownBoard: updateMap(target.knownBoard, coordStr, known => ({
+        ...known,
+        letter: event.payload.answer
+      }))
+    }));
+
+  return {
+    state: {
+      ...state,
+      players
+    },
+  };
 }
 
 export type InitPayload = {
@@ -306,8 +388,22 @@ type StartPayload = { type: 'start', };
 type JoinPayload = { type: 'join', name: string };
 type LeavePayload = { type: 'leave' };
 type DrawPayload = { type: 'draw' };
-type GuessPayload = { type: 'guess', targetId: string, coord: [number, number] };
-type AnswerPayload = { type: 'answer', coord: [number, number], replyId: number };
+type StartBattleship = { type: 'battleship' };
+type GuessPayload = {
+  type: 'guess',
+  targetId: string,
+  coord: [number, number]
+};
+type AnswerPayload = {
+  type: 'answer',
+  coord: [number, number],
+  answer: string | null
+};
+type GuessWordPayload = {
+  type: 'word',
+  targetId: string,
+  guess: string,
+};
 
 export type EventPayload =
   InitPayload
@@ -315,6 +411,7 @@ export type EventPayload =
   | LeavePayload
   | StartPayload
   | DrawPayload
+  | StartBattleship
   | GuessPayload
   | AnswerPayload;
 
@@ -344,6 +441,7 @@ export const EventHandlers: { [k in EventPayload["type"]]: ActionFn } = {
   'join': joinGame,
   'leave': _inGame(leaveGame),
   'draw': _inPhase(draw, 'bananagrams'),
+  'battleship': _owner(_inPhase(startBattleship, 'bananagrams')),
   'guess': _inPhase(guess, 'battleship'),
   'answer': _inPhase(answer, 'battleship'),
 };

@@ -9,13 +9,22 @@ import type {
 import type { GameState } from './state';
 
 
+type HasBoard = Pick<GameState, 'board' | 'pieces'>;
+
 const isBlank = (board: BoardState, row: number, column: number): boolean =>
   !(row in board) || !(column in board[row]) || !board[row][column];
+
+export const getLetter = (game: HasBoard, row: number, column: number): string => {
+  const piece = game.pieces[game.board[column]?.[row]?.id];
+
+  return piece && piece.type === 'tile' ? piece.letter : null;
+}
 
 const pi_2 = Math.PI / 2;
 const rotate = (x: number, y: number, steps: number = 1) =>
   ([x * Math.cos(pi_2 * steps) - y * Math.sin(pi_2 * steps),
     x * Math.sin(pi_2 * steps) + y * Math.cos(pi_2 * steps)]);
+
 /**
  * convert array of strings into an array of relative coordinates, relative to the top left [0,0] of shape, unrotated
  */
@@ -48,7 +57,7 @@ export function canPlace(board: BoardState, piece: PieceData, coord: Coord): boo
   return true;
 }
 
-export function setPieceCoord(game: GameState, piece: PieceData & Partial<PlacedPieceData>, coord: Coord): GameState {
+export function setPieceCoord<T extends HasBoard>(game: T, piece: PieceData & Partial<PlacedPieceData>, coord: Coord): T {
   const newPiece = { ...piece, x: coord[0], y: coord[1] };
   game.pieces[piece.id] = newPiece;
 

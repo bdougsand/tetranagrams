@@ -1,5 +1,4 @@
-import { Dispatch, useCallback, useEffect, useReducer, useRef } from 'react';
-import * as uuid from 'uuid';
+import { Dispatch, useEffect, useReducer, useRef } from 'react';
 
 import { ActionType } from './actions';
 import * as actions from './actions';
