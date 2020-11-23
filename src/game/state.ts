@@ -10,7 +10,7 @@ import { swapPiece } from './board';
 
 class GameServer extends Server {
   getParams() {
-    return selectKeys(this, ['userId', 'rand', 'owner', 'gameId'])
+    return selectKeys(this, ['userId', 'rand', 'owner', 'gameId', 'config'])
   }
 
   /**

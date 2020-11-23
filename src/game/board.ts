@@ -77,6 +77,9 @@ export function setPieceCoord<T extends HasBoard>(game: T, piece: PieceData & Pa
   return game;
 }
 
+/**
+ * Move a piece to the specified coordinates
+ */
 export function swapPiece(game: GameState, dest: Coord, pieceID=game.swapping) {
   const [col, row] = dest;
   const piece = game.pieces[pieceID];
@@ -92,13 +95,27 @@ export function swapPiece(game: GameState, dest: Coord, pieceID=game.swapping) {
     swapping: null,
   }, piece, dest);
 
-  // Placed piece:
+  // Moving a placed piece:
   if ('x' in piece) {
     const otherPieceId = game.board[row]?.[col]?.id;
     if (otherPieceId) {
       newGame = setPieceCoord(newGame, game.pieces[otherPieceId], [piece.x, piece.y]);
     }
+  } else {
+    let found = false;
+    const trayTiles = newGame.trayTiles.filter(data => {
+      if (data.id === pieceID) {
+        found = true;
+        return false;
+      }
+
+      return true;
+    });
+
+    if (found)
+      newGame.trayTiles = trayTiles;
   }
+
   return newGame;
 }
 
