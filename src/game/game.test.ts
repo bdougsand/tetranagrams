@@ -31,6 +31,10 @@ test('', () => {
         owner: Players[0].id,
         rand,
         gameId: '123',
+        config: {
+          seed: '',
+          minPlayers: 2
+        }
       })
   }
 

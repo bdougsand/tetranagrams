@@ -2,7 +2,9 @@ import firebase from 'firebase';
 import seedrandom from 'seedrandom';
 import App from './firebase';
 
-export interface CreateGameOptions {};
+export interface CreateGameOptions {
+  minPlayers?: number;
+};
 
 interface JoinGameOptions {
   id: string;
@@ -17,8 +19,10 @@ export interface EventMessage<T=any> {
   reId?: number;
 };
 
-interface GameConfig {
+export interface GameConfig {
   seed: string;
+  /** Minimum number of players */
+  minPlayers: number;
 }
 
 interface GameMeta {
@@ -45,6 +49,11 @@ const dbOnce = (query: firebase.database.Query): Promise<firebase.database.DataS
   new Promise(resolve => {
     query.once('value', snap => resolve(snap));
   });
+
+class ServerError extends Error {}
+class PermissionDenied extends ServerError {
+  code = 'permission-denied';
+}
 
 class Server {
   auth: firebase.auth.Auth;
@@ -89,6 +98,10 @@ class Server {
 
   get gameId() {
     return this.ref.key;
+  }
+
+  get config() {
+    return this.gameOptions.config;
   }
 
   get gameReady() {
@@ -157,13 +170,13 @@ class Server {
     this.resolveGameReady();
 
     this.gameOptions = { meta, config };
-    
+
   {
     const val = lastEvent.val();
     if (val) {
       this.startingId = this.lastKey = parseInt(Object.keys(val)[0]);
     }}
-      
+
     this.configWasChanged();
 
     this.ref.child('config').on('value', this.onConfigChanged, this);
@@ -256,7 +269,10 @@ class Server {
   }
 
   /// Public methods
-  async createGame(_options: CreateGameOptions = {}) {
+  async createGame(options: CreateGameOptions = {}) {
+    options = Object.assign({
+      minPlayers: 2
+    }, options);
     // const seed = Math.
     const seed = Math.random().toString(32) + Date.now().toString(32);
     this.ref = await this.db.ref('games').push({
@@ -265,7 +281,8 @@ class Server {
         timestamp: firebase.database.ServerValue.TIMESTAMP,
       },
       config: {
-        seed
+        seed,
+        ...options
       }
     });
     await this.startListening();
@@ -273,7 +290,7 @@ class Server {
 
   async updateConfig(config: Partial<GameConfig>) {
     if (this.owner !== this.auth.currentUser.uid)
-      throw 'Only the owner can modify the game configuration';
+      throw new PermissionDenied('Only the owner can modify the game configuration');
 
     return await this.ref.child('config').update(config);
   }

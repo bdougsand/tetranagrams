@@ -1,5 +1,5 @@
 import { getLetter } from "./board";
-import Server, { EventMessage } from "./server";
+import Server, { EventMessage, GameConfig } from "./server";
 import { nextKey } from './util';
 
 // playerBoard- [ [3,6]: "b", [7,8]: null, [18,6]: "u"]
@@ -54,6 +54,7 @@ export interface SharedGameState {
   columns: number;
   rows: number;
   rand: seedrandom.prng;
+  config: GameConfig;
 
   // These values will be different across clients
   myId: string;
@@ -145,14 +146,14 @@ type PlayerOptions = Partial<Pick<PlayerData, 'name'>>;
 const initPlayer = (options: PlayerOptions): PlayerData =>
   ({ name: 'unnamed player', ...options, knownBoard: new Map() })
 
-export type ClientParams = Pick<Server, 'userId' | 'rand' | 'owner' | 'gameId'>;
+export type ClientParams = Pick<Server, 'userId' | 'rand' | 'owner' | 'gameId' | 'config'>;
 type ActionFn<T = EventPayload, S extends SharedGameState = SharedGameState> =
   (state: S, event: EventMessage<T>, params: ClientParams) => ActionResult<S>;
 
 const initGame: ActionFn<InitPayload> = (_, event, server) => {
   const myId = server.userId;
 
-  const { columns = 6, rows = 10, name = '', ownerName } = event.payload;
+  const { columns = 6, rows = 6, name = '', ownerName } = event.payload;
   const pool = Object.keys(letters).reduce((pool, letter) => {
     for (let i = letters[letter]; i > 0; --i)
       pool.push(letter);
@@ -169,6 +170,7 @@ const initGame: ActionFn<InitPayload> = (_, event, server) => {
     rows,
     columns,
     rand: server.rand,
+    config: server.config,
 
     // These values will be different across clients
     myId,
@@ -247,7 +249,7 @@ function _drawLetters(state: SharedGameState, n = 1): SharedGameState {
 const StartingLetters = 15;
 
 const startGame: ActionFn<StartPayload> = (state, { timestamp }) => {
-  if (state.players.size < 2 || state.phase.state !== 'pregame')
+  if (state.players.size < state.config.minPlayers || state.phase.state !== 'pregame')
     return {
       state,
       error: "You must have at least two players to start the game"
@@ -377,6 +379,10 @@ const answer: ActionFn<AnswerPayload> = (state, event) => {
   };
 }
 
+const guessWord: ActionFn<GuessWordPayload> = (state, _event) => {
+  return { state };
+};
+
 export type InitPayload = {
   type: 'init',
   columns?: number,
@@ -394,15 +400,22 @@ type GuessPayload = {
   targetId: string,
   coord: [number, number]
 };
+
+/** Response from the target of a guess */
 type AnswerPayload = {
   type: 'answer',
   coord: [number, number],
+  /** The value of the tile at the coordinate, or null if a miss */
   answer: string | null
 };
+
+/** Attempt to complete a partly revealed word on an opponent's board */
 type GuessWordPayload = {
   type: 'word',
   targetId: string,
   guess: string,
+  /** Any coordinate that falls inside the word */
+  coord: [number, number],
 };
 
 export type EventPayload =
@@ -413,7 +426,8 @@ export type EventPayload =
   | DrawPayload
   | StartBattleship
   | GuessPayload
-  | AnswerPayload;
+  | AnswerPayload
+  | GuessWordPayload;
 
 type ActionFnWrapper<ExtraArgs extends any[] = []> = (fn: ActionFn, ...rest: ExtraArgs) => ActionFn;
 
@@ -444,6 +458,7 @@ export const EventHandlers: { [k in EventPayload["type"]]: ActionFn } = {
   'battleship': _owner(_inPhase(startBattleship, 'bananagrams')),
   'guess': _inPhase(guess, 'battleship'),
   'answer': _inPhase(answer, 'battleship'),
+  'word': _inPhase(guessWord, 'battleship'),
 };
 
 
