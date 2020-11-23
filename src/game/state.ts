@@ -2,11 +2,18 @@ import { Dispatch, useEffect, useReducer, useRef } from 'react';
 
 import { ActionType } from './actions';
 import * as actions from './actions';
-import { handleMessage, PieceId, PieceData, Coord, SharedGameState, ActionResult, EventPayload } from './eventReducer';
+import { handleMessage, PieceId, Coord, SharedGameState, ActionResult, EventPayload } from './eventReducer';
 import Server, { EventMessage } from './server';
 import { selectKeys } from './util';
 import { swapPiece } from './board';
 
+
+const canDraw = (game: GameState): [boolean, string?] =>
+  game.trayTiles.length > 0 ?
+  [false, 'You have unused tiles in your tray'] :
+  !game.pool.length ?
+  [false, 'There are no more tiles to draw'] :
+  [true];
 
 class GameServer extends Server {
   getParams() {
@@ -74,6 +81,7 @@ const Handlers: { [k in ActionType["type"]]: GameActionHandler } = {
   },
 
   create(app, action: actions.CreateAction) {
+    console.log('creating');
     app.server.createGame(action.serverOptions);
     app.server.send({
       type: 'init',
@@ -98,7 +106,12 @@ const Handlers: { [k in ActionType["type"]]: GameActionHandler } = {
     return app;
   },
 
-  draw(app, action: actions.DrawAction) {
+  draw(app) {
+    const [allowed,] = canDraw(app.game);
+    if (!allowed) {
+      return app;
+    }
+
     try {
       app.server.checkedSend(app.game, { type: 'draw' });
     } catch (err) {
@@ -130,7 +143,20 @@ const Handlers: { [k in ActionType["type"]]: GameActionHandler } = {
 
   // Purely local events //////////////////////////////////////////////////////
   drop_piece(app, action: actions.DropPiece) {
-    const game = swapPiece(app.game, action.payload.coords, action.payload.pieceID);
+    let { coords, pieceID } = action.payload.target;
+
+    let game = app.game;
+    if (pieceID) {
+      // If dropping onto another piece, get its coordinates
+      const piece = app.game.pieces[pieceID];
+      if ('x' in piece && !coords) {
+        coords = [piece.x, piece.y];
+      }
+    }
+
+    if (coords) {
+      game = swapPiece(app.game, coords, action.payload.pieceID);
+    }
 
     return game === app.game ? app : { ...app, game };
   }
@@ -146,9 +172,16 @@ function gameReducer(app: AppState, action: ActionType): AppState {
   return app;
 }
 
+const testGame: GameState = {
+      swapping: null,
+      draggingOver: null,
+      rand: require('seedrandom')(''),
+  "name":"New Game","gameId":"testgame","ownerId":"fakeID","players":new Map(),"phase":{"state":"bananagrams","started":1606076831437},"pool":["A","A","A","A","A","A","A","B","B","C","D","D","D","E","E","E","E","E","F","G","G","H","I","I","I","I","I","I","I","K","L","L","L","L","M","M","N","N","N","N","N","O","O","O","O","O","O","P","Q","R","R","R","R","S","S","S","T","T","T","T","T","T","U","U","U","V","W","W","Y","Y"],"rows":6,"columns":6,"config":{"minPlayers":2,"seed":"0.6fbsr19kvbo1enoq6rgg"},"myId":"fakeID","trayTiles":[{"id":1},{"id":2},{"id":3},{"id":4},{"id":5},{"id":6},{"id":7},{"id":8},{"id":9},{"id":10},{"id":11},{"id":12},{"id":13},{"id":14},{"id":15}],"board":[[null,null,null,null,null,null],[null,null,null,null,null,null],[null,null,null,null,null,null],[null,null,null,null,null,null],[null,null,null,null,null,null],[null,null,null,null,null,null]],"pieces":{"1":{"type":"tile","letter":"E","id":1},"2":{"type":"tile","letter":"V","id":2},"3":{"type":"tile","letter":"R","id":3},"4":{"type":"tile","letter":"Blank","id":4},"5":{"type":"tile","letter":"E","id":5},"6":{"type":"tile","letter":"E","id":6},"7":{"type":"tile","letter":"C","id":7},"8":{"type":"tile","letter":"E","id":8},"9":{"type":"tile","letter":"E","id":9},"10":{"type":"tile","letter":"E","id":10},"11":{"type":"tile","letter":"A","id":11},"12":{"type":"tile","letter":"G","id":12},"13":{"type":"tile","letter":"D","id":13},"14":{"type":"tile","letter":"R","id":14},"15":{"type":"tile","letter":"N","id":15}},"_nextId":16};
+
 function initApp(server: GameServer): AppState {
   return {
-    server
+    server,
+    // game: testGame
   };
 }
 

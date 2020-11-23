@@ -1,4 +1,4 @@
-import { ClientParams, EventPayload, InitPayload } from "./eventReducer";
+import { ClientParams, EventPayload, InitPayload, Coord } from "./eventReducer";
 import { CreateGameOptions, EventMessage } from "./server";
 
 export type CreateAction = {
@@ -19,11 +19,16 @@ export type JoinAction = {
 
 export type StartAction = { type: 'start' };
 
+export type DropTarget = {
+  coords?: Coord,
+  pieceID?: number,
+};
+
 export type DropPiece = {
   type: 'drop_piece',
   payload: {
     pieceID: number,
-    coords: [number, number],
+    target: DropTarget,
   }
 };
 
