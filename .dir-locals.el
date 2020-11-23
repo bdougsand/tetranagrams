@@ -7,4 +7,7 @@
  (json-mode
   (js-indent-line . 2))
  (typescript-mode
-  (typescript-indent-level . 2)))
+  (typescript-indent-level . 2)
+  (web-mode-code-indent-offset . 2))
+ (css-mode
+  (css-indent-offset . 2)))
