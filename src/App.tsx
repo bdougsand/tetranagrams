@@ -4,35 +4,24 @@ import * as React from 'react';
 import './App.css';
 
 import { GameState, useGame } from './game/state';
-import { PlacedTile, TileData, PieceId, Coord } from './game/eventReducer';
+import { PlacedTile, TileData, PieceId, Coord, CellData, PieceData } from './game/eventReducer';
 import { ActionType, DropTarget } from './game/actions';
+import * as $board from './game/board';
 
 import JoinScreen from './screen/Join';
 import PregameScreen from './screen/Pregame';
 
 
-// check if TileData is a tetromino, then return all cells that are part of tetramino
-
-//
-//   ['** ', ' **'],
-// [[0,0], [0, 1], [1,1], [1,2]];
-
-//   const pieces = game.pieces;
-//   const { id: pieceID } = game.board[coord[1]][coord[0]];
-//   const piece = pieces[pieceID];
-
-//   return getTileChains;
-// }
-
 type TileProps = {
   tile: TileData,
   draggable?: boolean,
+  data?: CellData,
 };
 
 const Tile: React.FC<TileProps> = ({ tile, draggable=true }) =>
   <div className="tile" draggable={draggable} data-pieceid={tile.id}>
     {tile.letter}
-    </div>;
+  </div>;
 
 const TetrominoShape = ({ shape, className }) =>
     null;
@@ -122,86 +111,87 @@ const useDragging = (dispatch: React.Dispatch<ActionType>) => {
   };
 };
 
-type BoardProps = {
-  game: GameState,
-  TileComponent?: React.ComponentType<{ tile: PlacedTile }>,
-  dispatch: React.Dispatch<any>,
-  dragState: DragState,
+type BoardProps<T = CellData> = {
+  TileComponent?: React.ComponentType<TileProps>,
+  className?: string,
+  style?: React.CSSProperties,
+  dragState?: DragState,
   onDragOver?: any,
   onDragStart?: any,
   onDrop?: any,
+  tiles: Iterable<[Coord, { cell: T, piece: PieceData }]>,
+  rows: number,
+  columns: number,
 };
 
-const Board: React.FC<BoardProps> =
-  ({ game, TileComponent = Tile, dispatch, dragState, onDragStart, onDragOver, onDrop }) => {
-    const { board: data, rows, swapping } = game;
-    const renderedIds = {};
+function Board<T extends CellData = CellData>(props: BoardProps<T>) {
+  const { tiles, TileComponent = Tile, dragState, onDragStart, onDragOver,
+          onDrop, rows, className = ''} = props;
+  const renderedIds = {};
 
-    return (
-      <div className={"board" + (swapping ? ' swapping' : '')}
-           onDragStart={onDragStart}
-           onDragOver={onDragOver}
-           onDrop={onDrop}
-           data-dragsource="board"
-           style={{
-             gridTemplateColumns: `repeat(${game.columns}, 4em)`,
-             gridTemplateRows: `[header] 0em repeat(${rows}, 4em)`
-           }}
-      >
-        {data.map((row, r) => (
-          row.map((tile, c) => {
-            const id = tile?.id;
-            if (id) {
-              // if (renderedIds[id])
-              //   return null;
+  return (
+    <div className={`board ${className}`}
+         onDragStart={onDragStart}
+         onDragOver={onDragOver}
+         onDrop={onDrop}
+         data-dragsource="board"
+         style={{
+           gridTemplateColumns: `repeat(${props.columns}, 4em)`,
+           gridTemplateRows: `[header] 0em repeat(${rows}, 4em)`
+         }}
+    >
+      {
+        Array.from(tiles, ([[c, r], { piece, cell }]) => {
+          const id = cell?.id;
+          if (id) {
+            // if (renderedIds[id])
+            //   return null;
 
-              renderedIds[id] = true;
-            }
+            renderedIds[id] = true;
+          }
 
-            const blank = !tile;
-            const piece = tile && game.pieces[id];
-            const tetro = piece?.type === 'tetromino' && piece.shape;
-            const row = rows - r + 1;
+          const blank = !cell;
+          const tetro = piece?.type === 'tetromino' && piece.shape;
+          const row = rows - r + 1;
 
-            const style = {
-              gridColumnStart: c + 1,
-              gridRowStart: row
-            };
-            let tetroClasses = '';
+          const style = {
+            gridColumnStart: c + 1,
+            gridRowStart: row
+          };
+          let tetroClasses = '';
 
-            if (tetro) {
-              /* const [w, h] = getShapeDimensions(tetro);
-               * Object.assign(style, {
-               *     gridColumnEnd: c + 1 + w,
-               *     gridRowStart: row - (h - 1),
-               *     gridRowEnd: row + 1,
-               * });
+          if (tetro) {
+            /* const [w, h] = getShapeDimensions(tetro);
+             * Object.assign(style, {
+             *     gridColumnEnd: c + 1 + w,
+             *     gridRowStart: row - (h - 1),
+             *     gridRowEnd: row + 1,
+             * });
 
-               * tetroClasses = w > h ? 'wide' : 'tall'; */
-              tetroClasses = '';
-            }
+             * tetroClasses = w > h ? 'wide' : 'tall'; */
+            tetroClasses = '';
+          }
 
-            const dropTarget = dragState && dragState.target;
-            const isDropTarget = dropTarget && isTarget(dropTarget, id, [c, r]);
+          const dropTarget = dragState && dragState.target;
+          const isDropTarget = dropTarget && isTarget(dropTarget, id, [c, r]);
 
-            return (
-              <div className={"tile-wrapper" + (blank ? ' blank' : '') +
-                                                 (swapping === id ? ' swapping-tile' : '') +
-                                                 (tetro ? ' tetromino' : '') +
-                                                 (isDropTarget ? ' drop-target' : '')}
-                   data-coords={[c, r]}
-                   style={style}
-                   key={id || `${c}-${r}`} >
-                {blank ? null :
-                 tetro ? <TetrominoShape shape={tetro}
-                                         className={`tetromino ${tetroClasses}`}
-                 /> :
-                 <TileComponent tile={piece as PlacedTile} />}
-              </div>
-            );
-        })))}
-      </div>
-    );
+          return (
+            <div className={"tile-wrapper" + (blank ? ' blank' : '') +
+                                                  (tetro ? ' tetromino' : '') +
+                                                  (isDropTarget ? ' drop-target' : '')}
+                 data-coords={[c, r]}
+                 style={style}
+                 key={id || `${c}-${r}`} >
+              {blank ? null :
+               tetro ? <TetrominoShape shape={tetro}
+                                       className={`tetromino ${tetroClasses}`}
+               /> :
+               <TileComponent tile={piece as PlacedTile} data={cell} />}
+            </div>
+          );
+        })}
+    </div>
+  );
   };
 
 type TrayProps = {
@@ -235,8 +225,9 @@ const BananaPhase: React.FC<BananaPhaseProps> = ({ game, dispatch }) => {
         {game.pool.length} letters remaining!
       </div>
       <div className="board-container">
-        <Board game={game}
-               dispatch={dispatch}
+        <Board tiles={$board.iterPieces(game)}
+               rows={game.rows}
+               columns={game.columns}
                {...dragging}
         />
       </div>

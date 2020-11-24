@@ -4,7 +4,8 @@ import type {
   PlacedPiece,
   PlacedPieceData,
   Coord,
-  Shape
+  Shape,
+  CellData
 } from './eventReducer';
 import type { GameState } from './state';
 
@@ -226,4 +227,46 @@ export function isSupported(game: GameState, pieceId: number): boolean {
 export function findUnsupported(game: GameState) {
   return Object.values(game.pieces)
     .filter(piece => !isSupported(game, piece.id)) as PlacedPiece[];
+}
+
+export function defaultMerger(data: CellData, other: any) {
+  return Object.assign(data, other);
+}
+
+type BoardCellIteratorItem<T = CellData> = [Coord, T];
+type BoardCellIterator<T = CellData> = Iterable<BoardCellIteratorItem<T>>;
+
+type BoardIteratorItem<T = CellData> = BoardCellIteratorItem<{ piece: PieceData, cell: T }>;
+type BoardIterator<T = CellData> = Iterable<BoardIteratorItem<T>>;
+
+type CellDataGetter<T> = (column: number, row: number) => T;
+export function *iterCells<T>(rows: number, columns: number, getData: CellDataGetter<T>): BoardCellIterator<T> {
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < columns; x++) {
+      yield [[x, y], getData(x, y)]
+    }
+  }
+}
+
+export function *iterPieces(game: GameState): BoardIterator {
+  yield *iterCells(game.rows, game.columns,
+                   (x, y) => {
+                     const cell = game.board[y][x];
+                     return { cell, piece: cell ? game.pieces[cell.id] : null };
+                   });
+}
+
+export function *iterOpponentBoard(game: GameState, userId: string){
+  const { knownBoard } = game.players.get(userId);
+  yield *iterCells(game.rows, game.columns,
+                   (x, y) => {
+                     const key = `${x},${y}`;
+                     const known = knownBoard.get(key);
+
+                     return {
+                       piece: known && known.letter &&
+                         { letter: known.letter, type: 'tile', id: null } as PieceData,
+                       cell: known && Object.assign({ id: null }, known)
+                     };
+                   });
 }
