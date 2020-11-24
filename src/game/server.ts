@@ -1,6 +1,9 @@
 import firebase from 'firebase';
 import seedrandom from 'seedrandom';
+
 import App from './firebase';
+
+import * as $util from './util';
 
 
 type DataSnapshot = firebase.database.DataSnapshot;
@@ -48,9 +51,26 @@ interface GameOptions {
 
 type EventHandler = (event: EventMessage, server: Server) => any;
 
+type CheckpointHandler = (checkpoint: Checkpoint) => any;
+type CheckpointConfig = {
+  /** Automatically create a checkpoint every n messages. */
+  autoCheckpoint?: number,
+  /** Function responsible for retrieving the current state */
+  getter: () => any,
+  /** Called when first connecting with the checkpoint (if there is one). Use to restore the state. */
+  loader: CheckpointHandler,
+};
+
 interface ServerOptions {
   debug: boolean;
   handler: EventHandler;
+  checkpoint: CheckpointConfig;
+};
+
+interface Checkpoint<T = any> {
+  timestamp: number;
+  lastEvent: number;
+  state: T;
 };
 
 const dbOnce = (query: firebase.database.Query): Promise<DataSnapshot> =>
@@ -67,6 +87,7 @@ class Server {
   auth: firebase.auth.Auth;
   db: firebase.database.Database;
 
+  /** The game root */
   ref: firebase.database.Reference;
   rand: seedrandom.prng;
   gameOptions: GameOptions;
@@ -91,7 +112,11 @@ class Server {
 
   /** Received messages that are waiting to be processed */
   pendingMessages = new Map<number, any>();
-  handler: EventHandler;
+  /** User-specified handler */
+  handler?: EventHandler;
+
+  checkpointConfig?: CheckpointConfig;
+  _lastCheckpoint = 0;
 
   _gameReady: Promise<boolean>;
   _resolveGameReady: (x: any) => any;
@@ -148,6 +173,9 @@ class Server {
     if (options.handler)
       this.handler = options.handler;
 
+    if (options.checkpoint)
+      this.checkpointConfig = options.checkpoint;
+
     this.ready = new Promise(resolve => {
       this.auth.signInAnonymously().then(
         cred => {
@@ -162,8 +190,8 @@ class Server {
   }
 
   /// Internal methods
-  getOnce = (field: string) => new Promise(resolve => {
-    this.ref.child(field).once('value', val => {
+  getOnce = (path: string) => new Promise(resolve => {
+    this.ref.child(path).once('value', val => {
       resolve(val.val());
     })
   });
@@ -173,17 +201,28 @@ class Server {
       this.getOnce('meta'),
       this.getOnce('config'),
       dbOnce(this.ref.child('events').orderByKey().limitToLast(1)),
+      dbOnce(this.ref.child('checkpoint')),
     ]);
-    const [meta, config, lastEvent] = await promises as [GameMeta, GameConfig, firebase.database.DataSnapshot];
+    const [meta, config, lastEvent, checkpoint] = await promises as [GameMeta, GameConfig, DataSnapshot, DataSnapshot];
     this.resolveGameReady();
 
     this.gameOptions = { meta, config };
 
-  {
-    const val = lastEvent.val();
-    if (val) {
+    if (checkpoint.exists()) {
+      const checkpointVal: Checkpoint = checkpoint.val();
+      console.log('restoring from checkpoint?', checkpointVal);
+      this.startingId = this.lastKey = this._lastCheckpoint = checkpointVal.lastEvent;
+
+      try {
+        this.checkpointConfig?.loader?.(checkpointVal);
+        this.lastProcessed = checkpointVal.lastEvent;
+      } catch (e) {
+        console.error('Failed to restore from checkpoint!', e);
+      }
+    } else if (lastEvent.exists()) {
+      const val = lastEvent.val();
       this.startingId = this.lastKey = parseInt(Object.keys(val)[0]);
-    }}
+    }
 
     this.configWasChanged();
 
@@ -218,11 +257,14 @@ class Server {
 
     this.lastKey = Math.max(this.lastKey, n);
 
+    if (n <= this.lastProcessed)
+      return;
+
     if (n - this.lastProcessed > 1) {
       // If it's a non-consecutive message, pop it on the pending queue
-      this.pendingMessages.set(n, event);
+      this.pushPending(n, event);
     } else {
-      this.processMessage(event);
+      await this.processMessage(event);
       this.processPending();
     }
   }
@@ -238,6 +280,10 @@ class Server {
     }
   }
 
+  pushPending(n: number, event: any) {
+    this.pendingMessages.set(n, event);
+  }
+
   /**
    * Process messages that were received prematurely
    */
@@ -248,10 +294,12 @@ class Server {
       if (!event)
         break;
 
-      await this.processMessage(event);
+      await this.processMessage(event, true);
     }
 
     await this.sendQueuedResponses();
+
+    this._autoCheckpoint();
   }
 
   async sendQueuedResponses() {
@@ -266,12 +314,13 @@ class Server {
     this.responses.clear();
   }
 
-  async processMessage(event: EventMessage) {
+  async processMessage(event: EventMessage, deferCheckpoint=false) {
     try {
       if (event.timestamp - this.lastTimestamp <= -30000) {
         // Skip stale event
         return;
       }
+
       const result = this.handler?.(event, this);
 
       if (result.then) await result;
@@ -281,9 +330,12 @@ class Server {
       this.lastTimestamp = event.timestamp;
       this.lastProcessed = event.id;
 
-      // Remove the pending response
+      // If there's a pending response, remove it
       if (event.reId && event.sender === this.userId)
         this.responses.delete(event.reId);
+
+      if (!deferCheckpoint)
+        this._autoCheckpoint();
     }
   }
 
@@ -300,7 +352,7 @@ class Server {
     const seed = Math.random().toString(32) + Date.now().toString(32);
     this.ref = await this.db.ref('games').push({
       meta: {
-        owner: this.auth.currentUser.uid,
+        owner: this.userId,
         timestamp: firebase.database.ServerValue.TIMESTAMP,
       },
       config: {
@@ -312,7 +364,7 @@ class Server {
   }
 
   async updateConfig(config: Partial<GameConfig>) {
-    if (this.owner !== this.auth.currentUser.uid)
+    if (this.owner !== this.userId)
       throw new PermissionDenied('Only the owner can modify the game configuration');
 
     return await this.ref.child('config').update(config);
@@ -323,7 +375,43 @@ class Server {
     await this.startListening();
   }
 
-  async send(payload: any, reId: number = null) {
+  async checkpoint(checkpoint: any) {
+    if (this.userId !== this.owner)
+      throw new Error('Only the game owner can create a checkpoint');
+
+    const fromEvent = this._lastCheckpoint;
+    const lastEvent = this.lastProcessed;
+    await this.ref.child('checkpoint').set({
+      timestamp: firebase.database.ServerValue.TIMESTAMP,
+      lastEvent,
+      payload: checkpoint
+    });
+    this._lastCheckpoint = lastEvent;
+
+    // Delete the events. We don't need a transaction here, because events are
+    // required by the rules to be immutable. The game owner can only delete them.
+    // The checkpoint has already been saved
+    await this.ref.child('events').update(
+      $util.reduce(
+        $util.range(fromEvent+1, lastEvent+1),
+        (changes, n) => Object.assign(changes, { [n]: null }),
+        {}));
+  }
+
+  _shouldAutoCheckpoint() {
+    return this.owner === this.userId
+      && this.lastProcessed > this._lastCheckpoint
+      && this.checkpointConfig?.autoCheckpoint
+      && this.lastProcessed - this._lastCheckpoint >= this.checkpointConfig?.autoCheckpoint;
+  }
+
+  async _autoCheckpoint() {
+    if (this._shouldAutoCheckpoint())
+      return await this.checkpoint(this.checkpointConfig.getter())
+        .catch(err => {
+          console.error('Error while saving checkpoint:', err);
+        });
+  }
 
   async send(payload: any, reId: number = null, recipient: string = null) {
     await this.gameReady;
@@ -348,13 +436,14 @@ class Server {
       data.reId = reId;
     }
 
+
     // Find the next unused id
     let n = this.lastKey + 1;
 
     while (true) {
       try {
         await this.ref.child(`events/${n}`).set(data);
-        break;
+        return n;
       } catch (e) {
         console.log(e);
         n++

@@ -33,3 +33,32 @@ export function selectKeys<T, K extends keyof T>(obj: T, keys: K[])  {
     return o;
   }, {} as any) as ({ [k in K]: T[k] })
 }
+
+export function *range(start: number, end: number) {
+  let i = start;
+  while (i < end) {
+    yield i++;
+  }
+}
+
+type Reducer<T, S> = (result: S, currentVal: T, index: number) => S;
+export function reduce<T, S=T>(xs: Iterable<T>, fn: Reducer<T, S>, init?: S) {
+  const iter = xs[Symbol.iterator]();
+  let result = init;
+
+  let i = 0, current: IteratorResult<T>, x: T;
+
+  if (init === undefined) {
+    current = iter.next();
+    result = current.value;
+  }
+
+  current = iter.next();
+
+  while (!current.done) {
+    result = fn(result, current.value, i++);
+    current = iter.next();
+  }
+
+  return result;
+}

@@ -1,4 +1,4 @@
-import { nextKey } from './util';
+import { nextKey, range, reduce } from './util';
 
 test('nextKey()', () => {
   const m = new Map([[1, 2], [3, 4], [5, 6], [7, 8]]);
@@ -23,4 +23,10 @@ test('nextKey()', () => {
   }
 
   expect(nextKey(m)).toStrictEqual(1);
+});
+
+test('reduce()', () => {
+  expect(reduce(range(0, 10), (a, b) => (a+b))).toEqual(45);
+  expect(reduce(range(5, 10), (m, n) => Object.assign(m, { [n]: 1 }), {}))
+    .toStrictEqual({ 5: 1, 6: 1, 7: 1, 8:1, 9: 1 });
 });

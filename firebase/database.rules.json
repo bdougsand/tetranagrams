@@ -25,6 +25,10 @@
             ".validate": "newData.isString()"
           }
         },
+        "checkpoint": {
+          ".write": "(data.exists() && data.parent().child('meta/owner').val() === auth.uid",
+          ".read": true
+        },
         "events": {
           "$eventId": {
             ".read": true,
