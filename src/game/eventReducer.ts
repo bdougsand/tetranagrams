@@ -83,8 +83,10 @@ export interface ActionResult<S extends SharedGameState = SharedGameState, T=Eve
   state: S;
   /** Set if the action is invalid */
   error?: any;
-  /** Could be used to send a reply */
+  /** If set, send a response message with this payload */
   response?: T;
+  /** Send the response privately */
+  responseRecipient?: string;
 }
 
 //https://hasbro-new.custhelp.com/app/answers/detail/a_id/19/~/how-many-of-each-letter-tile-are-included-in-a-scrabble-game%3F

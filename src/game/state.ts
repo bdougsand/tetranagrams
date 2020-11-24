@@ -38,13 +38,14 @@ class GameServer extends Server {
    * Wraps Server.send, first checking that the action is allowed from the
    * current game state. Throws an error if not.
    */
-  async checkedSend(game: GameState, payload: EventPayload, reId?: number) {
+  async checkedSend(game: GameState, ...args: Parameters<Server["send"]>) {
+    const payload = args[0] as EventPayload;
     const result = this.simulateResult(game, payload);
     if (result.error) {
       throw result.error;
     }
 
-    return await this.send(payload, reId);
+    return await this.send(...args);
   }
 }
 
@@ -126,7 +127,7 @@ const Handlers: { [k in ActionType["type"]]: GameActionHandler } = {
     const result = handleMessage(app.game, event, params) as ActionResult<GameState>;
 
     if (result.response) {
-      app.server.send(result.response, event.id);
+      app.server.send(result.response, event.id, result.responseRecipient);
     }
 
     // TODO Display errors, if appropriate
