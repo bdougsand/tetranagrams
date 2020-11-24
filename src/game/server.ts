@@ -2,6 +2,9 @@ import firebase from 'firebase';
 import seedrandom from 'seedrandom';
 import App from './firebase';
 
+
+type DataSnapshot = firebase.database.DataSnapshot;
+
 export interface CreateGameOptions {
   minPlayers?: number;
 };
@@ -17,6 +20,11 @@ export interface EventMessage<T=any> {
   payload: T;
   /** Indicates that this message is a reply to a previous message */
   reId?: number;
+};
+
+export interface PrivateEventMessage extends EventMessage {
+  id: null;
+  priv: true;
 };
 
 export interface GameConfig {
@@ -45,7 +53,7 @@ interface ServerOptions {
   handler: EventHandler;
 };
 
-const dbOnce = (query: firebase.database.Query): Promise<firebase.database.DataSnapshot> =>
+const dbOnce = (query: firebase.database.Query): Promise<DataSnapshot> =>
   new Promise(resolve => {
     query.once('value', snap => resolve(snap));
   });
@@ -180,6 +188,10 @@ class Server {
     this.configWasChanged();
 
     this.ref.child('config').on('value', this.onConfigChanged, this);
+
+    this.ref.child(`inbox/${this.userId}`)
+      .orderByChild('timestamp')
+      .on('child_added', this._onPrivateEventAdded);
     this.ref.child('events')
       .orderByKey()
       .on('child_added', this.onEventAdded, this.onCancel, this);
@@ -188,9 +200,10 @@ class Server {
   stopListening() {
     this.ref.child('config').off('value', this.onConfigChanged);
     this.ref.child('events').off('child_added', this.onEventAdded);
+    this.ref.child(`inbox/${this.userId}`).off('child_added', this._onPrivateEventAdded);
   }
 
-  onConfigChanged(snap: firebase.database.DataSnapshot) {
+  onConfigChanged(snap: DataSnapshot) {
     this.gameOptions.config = snap.val();
     this.configWasChanged();
   }
@@ -199,9 +212,8 @@ class Server {
     this.rand = seedrandom(this.gameOptions.config.seed);
   }
 
-  onEventAdded(snap: firebase.database.DataSnapshot, prevChildKey?: string) {
-    const k = snap.key;
-    const n = parseInt(k);
+  async onEventAdded(snap: DataSnapshot, prevChildKey?: string) {
+    const n = parseInt(snap.key);
     const event = Object.assign(snap.val(), { id: n }) as EventMessage;
 
     this.lastKey = Math.max(this.lastKey, n);
@@ -212,6 +224,17 @@ class Server {
     } else {
       this.processMessage(event);
       this.processPending();
+    }
+  }
+
+  async _onPrivateEventAdded(snap: DataSnapshot) {
+    try {
+      const event = snap.val() as PrivateEventMessage;
+      const result = this.handler?.(event, this);
+
+      if (result.then) await result;
+    } catch (e) {
+
     }
   }
 
@@ -301,12 +324,20 @@ class Server {
   }
 
   async send(payload: any, reId: number = null) {
+
+  async send(payload: any, reId: number = null, recipient: string = null) {
     await this.gameReady;
+
     const data: any = {
-      sender: this.auth.currentUser?.uid,
+      sender: this.userId,
       timestamp: firebase.database.ServerValue.TIMESTAMP,
       payload
     };
+
+    if (recipient) {
+      await this.ref.child(`inbox/${recipient}`).push(data);
+      return;
+    }
 
     if (reId) {
       if (this.startingId > this.lastProcessed) {

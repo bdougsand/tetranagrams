@@ -28,7 +28,7 @@
         "events": {
           "$eventId": {
             ".read": true,
-            ".write": "(!data.exists() && newData.hasChildren(['sender', 'timestamp'])) || (!newData.exists() && data.parent().child('meta/owner').val() === auth.uid)",
+            ".write": "(!data.exists() && newData.hasChildren(['sender', 'timestamp', 'payload'])) || (!newData.exists() && data.parent().child('meta/owner').val() === auth.uid)",
             "sender": {
               ".validate": "newData.val() === auth.uid"
             },
@@ -36,7 +36,24 @@
               ".validate": "newData.val() === now"
             },
             "reId": {
-              ".validate": "newDate.isNumber()"
+              ".validate": "newData.isNumber()"
+            },
+          }
+        },
+        "inbox": {
+          "$userId": {
+            "$key": {
+              ".read": "$userId === auth.uid",
+              ".write": "!data.exists() && newData.hasChildren(['sender', 'timestamp', 'payload'])",
+              "sender": {
+                ".validate": "newData.val() === auth.uid"
+              },
+              "timestamp": {
+                ".validate": "newData.val() === now"
+              },
+              "$other": {
+                ".write": "$other === 'payload'"
+              }
             }
           }
         },
