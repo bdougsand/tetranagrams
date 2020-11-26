@@ -1,4 +1,4 @@
-import { getLetter } from "./board";
+import { getLetter, isValidCoord } from "./board";
 import Server, { EventMessage, GameConfig } from "./server";
 import { nextKey } from './util';
 
@@ -135,7 +135,7 @@ const initBoard = (rows: number, cols: number): BoardState =>
   Array(rows).fill(null).map(() => Array(cols).fill(null));
 
 type CoordString = string;
-type KnownData = {
+export type KnownData = {
   guesserId: string,
   letter?: string | null
 };
@@ -325,6 +325,13 @@ const guess: ActionFn<GuessPayload> = (state, event) => {
       error: "It's not your turn"
     };
 
+  if (!isValidCoord(state, payload.coord)) {
+    return {
+      state,
+      error: "Invalid coordinate"
+    };
+  }
+
   const guess = getGuess(state, payload.targetId, payload.coord)
   if (guess) {
     return {
@@ -397,7 +404,7 @@ type JoinPayload = { type: 'join', name: string };
 type LeavePayload = { type: 'leave' };
 type DrawPayload = { type: 'draw' };
 type StartBattleship = { type: 'battleship' };
-type GuessPayload = {
+export type GuessPayload = {
   type: 'guess',
   targetId: string,
   coord: [number, number]
@@ -412,7 +419,7 @@ type AnswerPayload = {
 };
 
 /** Attempt to complete a partly revealed word on an opponent's board */
-type GuessWordPayload = {
+export type GuessWordPayload = {
   type: 'word',
   targetId: string,
   guess: string,
@@ -478,6 +485,6 @@ export const handleMessage: ActionFn<EventPayload> =
 
   return {
     state,
-    error: `Unrecognized action: ${payload.type}`
+    error: `Unrecognized action: ${payload}`
   };
 }

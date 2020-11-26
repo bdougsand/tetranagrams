@@ -15,6 +15,9 @@ type HasBoard = Pick<GameState, 'board' | 'pieces'>;
 const isBlank = (board: BoardState, row: number, column: number): boolean =>
   !(row in board) || !(column in board[row]) || !board[row][column];
 
+export const isValidCoord = ({rows, columns}: Pick<GameState, 'rows' | 'columns'>, [y, x]: Coord) =>
+  x >= 0 && x < columns && y >= 0 && y < rows;
+
 export const getLetter = (game: HasBoard, row: number, column: number): string => {
   const piece = game.pieces[game.board[column]?.[row]?.id];
 
@@ -51,6 +54,7 @@ const getPieceCoordinates = (piece: PlacedPiece) => {
 }
 
 export function canPlace(board: BoardState, piece: PieceData, coord: Coord): boolean {
+  /// XXX This doesn't seem to handle coordinates outside the board!
   const coords = piece.type === 'tile' ? [coord] : getCoordinates(coord, piece.shape);
   for (const [col, row] of coords)
     if (!isBlank(board, row, col))

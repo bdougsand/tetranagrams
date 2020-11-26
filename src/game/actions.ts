@@ -1,6 +1,7 @@
-import { ClientParams, EventPayload, InitPayload, Coord } from "./eventReducer";
+import type { ClientParams, EventPayload, InitPayload, Coord, GuessPayload, GuessWordPayload } from "./eventReducer";
 import { CreateGameOptions, EventMessage } from "./server";
 
+// Actions that may get sent to the server ////////////////////////////////////
 export type CreateAction = {
   type: 'create',
   serverOptions: CreateGameOptions,
@@ -19,6 +20,10 @@ export type JoinAction = {
 
 export type StartAction = { type: 'start' };
 
+export type GuessAction = GuessPayload;
+export type GuessWordAction = GuessWordPayload;
+
+// Actions that affect local state ////////////////////////////////////////////
 export type DropTarget = {
   coords?: Coord,
   pieceID?: number,
@@ -50,4 +55,6 @@ export type ActionType =
   | JoinAction
   | ServerAction
   | StartAction
-  | DropPiece;
+  | DropPiece
+  | GuessAction
+  | GuessWordAction;

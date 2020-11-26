@@ -123,6 +123,26 @@ const Handlers: { [k in ActionType["type"]]: GameActionHandler<FindActionType<Ac
     return app;
   },
 
+  guess(app, action) {
+    try {
+      app.server.checkedSend(app.game, action);
+    } catch (err) {
+
+    }
+
+    return app;
+  },
+
+  word(app, action) {
+    try {
+      app.server.checkedSend(app.game, action);
+    } catch (err) {
+
+    }
+
+    return app;
+  },
+
   // Handle events coming back from the server ////////////////////////////////
   server_action(app, action) {
     const { event, params } = action.payload;
