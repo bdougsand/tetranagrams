@@ -64,11 +64,13 @@ export interface AppState {
   server: GameServer;
 }
 
-type GameActionHandler = (app: AppState, action: ActionType) => AppState;
+type GameActionHandler<T=ActionType> = (app: AppState, action: T) => AppState;
 
-const Handlers: { [k in ActionType["type"]]: GameActionHandler } = {
+type FindActionType<Union, K> = Union extends { type: K } ? Union : never;
+
+const Handlers: { [k in ActionType["type"]]: GameActionHandler<FindActionType<ActionType, k>> } = {
   // Actions that send events to the server ///////////////////////////////////
-  join(app, action: actions.JoinAction) {
+  join(app, action) {
     app.server.joinGame({ id: action.gameId });
     app.server.send({
       type: 'join',
@@ -81,7 +83,7 @@ const Handlers: { [k in ActionType["type"]]: GameActionHandler } = {
     return app;
   },
 
-  create(app, action: actions.CreateAction) {
+  create(app, action) {
     console.log('creating');
     app.server.createGame(action.serverOptions);
     app.server.send({
@@ -122,7 +124,7 @@ const Handlers: { [k in ActionType["type"]]: GameActionHandler } = {
   },
 
   // Handle events coming back from the server ////////////////////////////////
-  server_action(app, action: actions.ServerAction) {
+  server_action(app, action) {
     const { event, params } = action.payload;
     const result = handleMessage(app.game, event, params) as ActionResult<GameState>;
 
@@ -167,7 +169,7 @@ function gameReducer(app: AppState, action: ActionType): AppState {
   const handler = Handlers[action.type];
 
   if (handler) {
-    return handler(app, action);
+    return handler(app, action as any);
   }
 
   return app;
