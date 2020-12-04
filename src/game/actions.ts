@@ -19,6 +19,7 @@ export type JoinAction = {
 };
 
 export type StartAction = { type: 'start' };
+export type BattleshipAction = { type: 'battleship' };
 
 export type GuessAction = GuessPayload;
 export type GuessWordAction = GuessWordPayload;
@@ -51,10 +52,11 @@ export type ServerAction = {
 
 export type ActionType =
   CreateAction
-  | DrawAction
   | JoinAction
   | ServerAction
   | StartAction
+  | DrawAction
   | DropPiece
+  | BattleshipAction
   | GuessAction
   | GuessWordAction;

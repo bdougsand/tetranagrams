@@ -3,41 +3,66 @@
   margin: 1em;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+h3 {
+  margin: auto;
+  margin-bottom: 1em;
+  text-align: justify;
+  width: 50%;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+.warning {
+  background-color: salmon;
+  padding: 0.5em;
+  position: absolute;
+  right: 1em;
+  top: 0;
+  width: 150px;
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
+.screen {
+  border: 3px solid #aaa;
+  padding: 1em;
+}
+
+.join-screen {
+
+}
+
+form {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
 }
 
-.App-link {
-  color: #61dafb;
+.join-screen form {
+  padding-left: 25%;
+  padding-right: 25%;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+label {
+  font-size: larger;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0.5em;
+  text-align: left;
 }
 
+label input {
+  margin-top: 0.3em;
+}
+
+input[type=text] {
+  font-size: larger;
+}
+
+button {
+  padding: 0.5em;
+  font-size: larger;
+  font-variant: small-caps;
+  text-transform: uppercase;
+}
+
+
+/* Game board */
 .board-container {
   display: inline-block;
   margin: auto;
@@ -47,28 +72,137 @@
 
 .board {
   display: grid;
-  /* grid-template-columns: repeat(6, 4em); */
-  /* grid-template-rows: [header] 1em repeat(10, 4em); */
-  /* grid-auto-rows: 3em; */
   /* grid-gap: 0.5em; */
+}
+
+/* Bananagrams mode */
+.pool {
+  padding-bottom: 0.25em;
+}
+
+.tile-tray {
+  border: 2px solid #aaa;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+
+  padding: 0.5em;
+}
+
+.tile-tray .tile {
+  height: 4em;
+  width: 4em;
+  flex-shrink: 0;
+  margin-right: 0.25em;
+}
+
+.countdown-clock {
+  font-family: monospace;
+  font-size: 30pt;
+  font-weight: bold;
+  display: flex;
+
+  transition: color 0.5s linear;
+}
+
+.countdown-clock.imminent {
+  color: crimson;
+}
+
+/* Battleship mode boards */
+.opponent {
+  display: inline-block;
+  margin: 10px;
+}
+
+.opponent.my-board {
+  border: 3px solid green;
+}
+
+.opponent .board {
+  /* Board components are sized in ems to simplify scaling */
+  font-size: x-small;
+}
+
+.my-turn .opponent .tile-wrapper.blank {
+  cursor: pointer;
+}
+
+.my-turn .opponent:not(.my-board) .tile-wrapper.blank:hover {
+  border: 2px solid maroon;
+}
+
+.tile .overlay, .miss .overlay {
+  font-size: 2.9em;
+  font-weight: bold;
+  opacity: 0.3;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+}
+
+.hit-tile .overlay {
+  color: green;
+}
+
+.miss .overlay {
+  color: maroon;
+}
+
+.opponent.my-board .tile.hidden {
+  opacity: 0.4;
+}
+
+@keyframes targeting-oscillate {
+  from {
+    color: black;
+    transform: rotate(0deg);
+  }
+
+  50% {
+    color: red;
+  }
+
+  to {
+    color: black;
+    transform: rotate(360deg);
+  }
+}
+
+.fitting:not(:hover) {
+  border: 1px solid blue;
+}
+
+.tile-wrapper .targeting:not(.miss) {
+  font-size: xx-large;
+  font-weight: bold;
+  animation: targeting-oscillate infinite 3s linear;
+  line-height: 100%;
+  padding-top: 0.15em;
+  transform-origin: 50% 45%;
+}
+
+.tile.fitting {
+  box-shadow: 0 0 4px blue;
+}
+
+.tile-wrapper .fitting:not(.tile) {
+  text-transform: uppercase;
+  font-size: x-large;
+}
+
+.tile-wrapper .fitting.targeting {
+  animation: none;
+  padding-top: 0;
+  font-size: x-large;
 }
 
 .board .row {
   display: flex;
   flex-direction: row;
-}
-
-.column-header {
-  grid-row: header;
-  flex: 1;
-  height: 1em;
-  margin: 0.25em;
-  justify-content: space-evenly;
-  background-color: lightblue;
-}
-
-.column-header.selected {
-  background-color: blue;
 }
 
 .tile-wrapper {
@@ -80,6 +214,25 @@
   border: 1px solid white;
   box-shadow: 2px 2px #ccc inset;
 }
+
+.tile-wrapper.selected {
+  background-color: lightblue;
+}
+
+.controls-wrapper {
+  display: inline-block;
+}
+
+.launch-controls {
+  display: flex;
+  flex-direction: row;
+  margin: auto;
+}
+
+.launch-controls button {
+
+}
+
 
 .tile-wrapper.tetromino {
   z-index: 1;
@@ -109,19 +262,26 @@
   background-color: #aaaaaa;
 }
 
-.tile {
+.tile, .tile-wrapper .miss, .tile-wrapper .targeting, .tile-wrapper .fitting {
   display: flex;
   justify-content: center;
   align-items: center;
-  font-weight: bold;
   width: 100%;
   height: 100%;
+  user-select: none;
+  position: relative;
+}
+
+.tile {
+  font-weight: bold;
+  background-color: white;
   border: 1px solid black;
   border-radius: 5px;
   box-shadow: 2px 2px 3px #aaa;
-  user-select: none;
+}
 
-  background-color: white;
+.tile-wrapper .miss {
+  background-color: pink;
 }
 
 .tetromino {
@@ -150,55 +310,36 @@
   pointer-events: painted;
 }
 
-.tile-tray {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: center;
+@keyframes x-axis-spin {
+  from {
+    transform: rotateX(0deg);
+  }
 
-  padding: 0.5em;
+  to {
+    transform: rotateX(360deg);
+  }
 }
 
-.tile-tray .tile {
-  height: 4em;
-  width: 4em;
-  flex-shrink: 0;
+.reticule {
+  animation: x-axis-spin infinite 2s linear;
+  color: maroon;
+  transform-origin: 0 56%;
+  display: inline-block;
 }
 
-.screen {
-  border: 3px solid #aaa;
-  padding: 1em;
+
+.selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  left: 0;
 }
 
-.join-screen {
+.selection-area {
+  background-color: #add8e666;
+  position: absolute;
+  pointer-events: none;
 
-}
-
-form {
-  display: flex;
-  flex-direction: column;
-}
-
-form.join {
-
-}
-
-label {
-  font-size: larger;
-  padding: 1em;
-}
-
-label input {
-  margin-left: 1em;
-}
-
-input[type=text] {
-  font-size: larger;
-}
-
-button {
-  padding: 0.5em;
-  font-size: larger;
-  font-variant: small-caps;
-  text-transform: uppercase;
+  z-index: 10;
 }

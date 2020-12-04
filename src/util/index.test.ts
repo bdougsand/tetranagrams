@@ -1,4 +1,4 @@
-import { setIn } from ".";
+import { classnames, setIn } from ".";
 
 test('setIn', () => {
   const options = {};
@@ -7,4 +7,8 @@ test('setIn', () => {
 
   setIn(options, ['game', 'name'], 'Test Game');
   expect(options).toStrictEqual({ level: 1, game: { name: 'Test Game' }});
+});
+
+test('classnames', () => {
+  console.log(classnames({ a: true, b: false }, [{ c: true }], undefined, [[['hi', {name: true}]]]));
 });

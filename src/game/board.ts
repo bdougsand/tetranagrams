@@ -5,21 +5,24 @@ import type {
   PlacedPieceData,
   Coord,
   Shape,
-  CellData
+  CellData,
+  PlacedTile,
+  KnownBoard
 } from './eventReducer';
 import type { GameState } from './state';
 
 
-type HasBoard = Pick<GameState, 'board' | 'pieces'>;
+export type HasBoard = Pick<GameState, 'board' | 'pieces'>;
+export type HasGrid = Pick<GameState, 'rows' | 'columns'>;
 
 const isBlank = (board: BoardState, row: number, column: number): boolean =>
   !(row in board) || !(column in board[row]) || !board[row][column];
 
-export const isValidCoord = ({rows, columns}: Pick<GameState, 'rows' | 'columns'>, [y, x]: Coord) =>
+export const isValidCoord = ({rows, columns}: HasGrid, [x, y]: Coord) =>
   x >= 0 && x < columns && y >= 0 && y < rows;
 
-export const getLetter = (game: HasBoard, row: number, column: number): string => {
-  const piece = game.pieces[game.board[column]?.[row]?.id];
+export const getLetter = (game: HasBoard, column: number, row: number): string => {
+  const piece = game.pieces[game.board[row]?.[column]?.id];
 
   return piece && piece.type === 'tile' ? piece.letter : null;
 }
@@ -42,7 +45,7 @@ export const getCoordinates = (anchor: Coord, shape: Shape, rotation: number = 0
         boardCoordinates.push([anchor[0] + x, yMax - (anchor[1] + y)]);
       }
     })
-  })
+  });
   return boardCoordinates;
 }
 
@@ -85,7 +88,7 @@ export function setPieceCoord<T extends HasBoard>(game: T, piece: PieceData & Pa
 /**
  * Move a piece to the specified coordinates
  */
-export function swapPiece(game: GameState, dest: Coord, pieceID=game.swapping) {
+export function swapPiece(game: GameState, dest: Coord, pieceID: number) {
   const [col, row] = dest;
   const piece = game.pieces[pieceID];
   const newBoard = game.board.map(row => [...row]);
@@ -182,6 +185,18 @@ export function traceChain(game: GameState, coord: Coord, dir: Direction): Coord
   return pieces
 }
 
+export function readWord(game: GameState, coord: Coord, dir: Direction): string {
+  const chain = traceChain(game, coord, dir);
+  return chain ?
+    getTiles(game, [coord].concat(chain))
+      .map(piece => getLetter(game, piece.x, piece.y)).join('')
+    : null;
+}
+
+export function wordMatches(game: GameState, word: string, coord: Coord, dir: Direction): boolean {
+  return readWord(game, coord, dir)?.toLocaleLowerCase() === word.toLocaleLowerCase();
+}
+
 export function getTileChains(game: GameState, coord: Coord): PlacedPiece[][] {
   const dirs: Direction[] = [[1, 0], [0, -1]];
   const chains: PlacedPiece[][] = [];
@@ -198,6 +213,65 @@ export function getTileChains(game: GameState, coord: Coord): PlacedPiece[][] {
   }
 
   return chains;
+}
+
+/**
+ *  Find groups of connected tiles. Returns an array of arrays of piece IDs.
+ */
+export function getIslands(game: Pick<GameState, 'pieces' | 'board'>) {
+  const assignments: { [k in string]: string } = {};
+  const sets: { [k in string]: string[] } = {};
+
+  const addToSet = (s: string, id: string) => {
+    assignments[id] = s;
+    if (!sets[s]) sets[s] = [];
+    sets[s].push(id);
+  };
+  const mergeSets = (s1: string, s2: string) => {
+    if (s1 === s2) return s1;
+
+    const oldS = s1 < s2 ? s1 : s2;
+    const newS = s1 < s2 ? s2 : s1;
+
+    for (const id of sets[oldS]) {
+      assignments[id] = newS;
+      sets[newS].push(id);
+    }
+
+    delete sets[oldS];
+    return newS;
+  };
+
+  const dirs: Direction[] = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+  let nextSet = 1;
+  for (const pieceId of Object.keys(game.pieces)) {
+    const piece = game.pieces[pieceId];
+    if (!('x' in piece))
+      continue;
+
+    let thisSet = assignments[pieceId];
+    if (!thisSet) {
+      thisSet = (nextSet++).toString(36).padStart(2, '0');
+      addToSet(thisSet, pieceId);
+    }
+
+    for (const [dx, dy] of dirs) {
+      const otherPieceId = game.board[piece.y + dy]?.[piece.x + dx]?.id;
+
+      if (!otherPieceId)
+        continue;
+
+      const otherSet = assignments[otherPieceId];
+      if (otherSet) {
+        thisSet = mergeSets(thisSet, otherSet);
+      } else {
+        addToSet(thisSet, '' + otherPieceId);
+      }
+    }
+  }
+
+  return Object.values(sets);
 }
 
 export function isSupported(game: GameState, pieceId: number): boolean {
@@ -260,17 +334,88 @@ export function *iterPieces(game: GameState): BoardIterator {
                    });
 }
 
-export function *iterOpponentBoard(game: GameState, userId: string){
+export type BattleshipTile = PlacedTile & {
+  hidden: boolean,
+  guesserId?: string,
+};
+
+export function *iterBattleshipBoard(game: GameState, userId: string){
+  const isMe = userId === game.myId;
   const { knownBoard } = game.players.get(userId);
+
   yield *iterCells(game.rows, game.columns,
                    (x, y) => {
                      const key = `${x},${y}`;
                      const known = knownBoard.get(key);
+                     const myCell = isMe && game.board[y][x];
+                     const myTile = myCell && game.pieces[myCell.id] as PlacedTile;
+                     const myLetter = myTile?.letter;
 
                      return {
-                       piece: known && known.letter &&
-                         { letter: known.letter, type: 'tile', id: null } as PieceData,
-                       cell: known && Object.assign({ id: null }, known)
+                       piece: {
+                         letter: known?.letter || myLetter,
+                         type: 'tile',
+                         id: null,
+                         x,
+                         y,
+                         hidden: myCell && !known,
+                         guesserId: known?.guesserId,
+                       } as BattleshipTile,
+                       cell: known ?
+                         Object.assign({ id: null }, known)
+                         : (myCell || null)
                      };
                    });
+}
+
+/**
+ * Checks each legal direction to check which substring (including the empty
+ * string) of `word` will fit the known information about the board. Returns an
+ * array of objects containing information about the partial and complete match
+ * in each direction.
+ */
+export function fitWord(board: KnownBoard, coord: Coord, word: string, grid: HasGrid) {
+  word = word.toLocaleLowerCase();
+  const [x0, y0] = coord;
+  const legalDirs = [[0, -1], [1, 0]];
+
+  let i = 0;
+  let done = 0;
+
+  const result = legalDirs.map(dir => ({ dir,
+                                         tiles: [] as { x: number, y: number, letter: string }[],
+                                         done: false,
+                                         word: '' }))
+
+  for (const c of word) {
+    for (const dirResult of result) {
+      if (dirResult.done)
+        continue;
+
+      const { dir: [dx, dy] } = dirResult;
+      const x = x0 + dx*i;
+      const y = y0 + dy*i;
+
+      if (isValidCoord(grid, [x, y])) {
+        const known = board.get(`${x},${y}`);
+        const letter = known?.letter?.toLocaleLowerCase();
+
+        if ((!letter && !known) || letter === c) {
+          dirResult.tiles.push({ x, y, letter: c });
+          dirResult.word += c;
+          continue;
+        }
+      }
+
+      dirResult.done = true;
+      done += 1;
+    }
+
+    if (done === result.length)
+      break;
+
+    i++;
+  }
+
+  return result;
 }

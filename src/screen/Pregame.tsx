@@ -22,9 +22,11 @@ const PregameScreen: React.FunctionComponent<PregameScreenProps> = ({ game, disp
         {ready ? "Start the Game!" : "Waiting for players..."}
       </button>
 :
-     <div className="">{ready ?
-                        `Waiting for ${ownerName(game)} to start the game...` :
-                        `Waiting for ${moreNeeded} more players...`}</div>
+     <div className="">
+       {ready ?
+        `Waiting for ${ownerName(game)} to start the game...` :
+        `Waiting for ${moreNeeded} more players...`}
+     </div>
      }
     </div>
   );

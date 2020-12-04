@@ -2,7 +2,7 @@ import { Dispatch, useEffect, useReducer, useRef } from 'react';
 
 import { ActionType } from './actions';
 import * as actions from './actions';
-import { handleMessage, PieceId, Coord, SharedGameState, ActionResult, EventPayload } from './eventReducer';
+import { handleMessage, SharedGameState, ActionResult, EventPayload } from './eventReducer';
 import Server, { EventMessage } from './server';
 import { selectKeys } from './util';
 import { swapPiece } from './board';
@@ -53,8 +53,7 @@ export interface GameState extends SharedGameState {
   // dropping: PieceData;
   // These could be stored outside game state, e.g. in component state
   // selectedColumn: number;
-  swapping: PieceId;
-  draggingOver: Coord;
+  lastEvent?: EventMessage<EventPayload>;
 }
 
 export interface AppState {
@@ -102,6 +101,16 @@ const Handlers: { [k in ActionType["type"]]: GameActionHandler<FindActionType<Ac
   start(app, _action) {
     try {
       app.server.checkedSend(app.game, { type: 'start' });
+    } catch (err) {
+      // TODO log the error
+    }
+
+    return app;
+  },
+
+  battleship(app, _action) {
+    try {
+      app.server.checkedSend(app.game, { type: 'battleship' });
     } catch (err) {
       // TODO log the error
     }
@@ -157,6 +166,8 @@ const Handlers: { [k in ActionType["type"]]: GameActionHandler<FindActionType<Ac
     if (result.state === app.game)
       return app;
 
+    result.state.lastEvent = event;
+
     return {
       ...app,
 
@@ -196,15 +207,76 @@ function gameReducer(app: AppState, action: ActionType): AppState {
 }
 
 const testGame: GameState = {
-      swapping: null,
-      draggingOver: null,
       rand: require('seedrandom')(''),
-  "name":"New Game","gameId":"testgame","ownerId":"fakeID","players":new Map(),"phase":{"state":"bananagrams","started":1606076831437},"pool":["A","A","A","A","A","A","A","B","B","C","D","D","D","E","E","E","E","E","F","G","G","H","I","I","I","I","I","I","I","K","L","L","L","L","M","M","N","N","N","N","N","O","O","O","O","O","O","P","Q","R","R","R","R","S","S","S","T","T","T","T","T","T","U","U","U","V","W","W","Y","Y"],"rows":6,"columns":6,"config":{"minPlayers":2,"seed":"0.6fbsr19kvbo1enoq6rgg"},"myId":"fakeID","trayTiles":[{"id":1},{"id":2},{"id":3},{"id":4},{"id":5},{"id":6},{"id":7},{"id":8},{"id":9},{"id":10},{"id":11},{"id":12},{"id":13},{"id":14},{"id":15}],"board":[[null,null,null,null,null,null],[null,null,null,null,null,null],[null,null,null,null,null,null],[null,null,null,null,null,null],[null,null,null,null,null,null],[null,null,null,null,null,null]],"pieces":{"1":{"type":"tile","letter":"E","id":1},"2":{"type":"tile","letter":"V","id":2},"3":{"type":"tile","letter":"R","id":3},"4":{"type":"tile","letter":"Blank","id":4},"5":{"type":"tile","letter":"E","id":5},"6":{"type":"tile","letter":"E","id":6},"7":{"type":"tile","letter":"C","id":7},"8":{"type":"tile","letter":"E","id":8},"9":{"type":"tile","letter":"E","id":9},"10":{"type":"tile","letter":"E","id":10},"11":{"type":"tile","letter":"A","id":11},"12":{"type":"tile","letter":"G","id":12},"13":{"type":"tile","letter":"D","id":13},"14":{"type":"tile","letter":"R","id":14},"15":{"type":"tile","letter":"N","id":15}},"_nextId":16};
+  name:  "New Game",
+  gameId: "testgame",
+  ownerId: "fakeID",
+  players: new Map(),
+  phase: {
+    state: "bananagrams",
+    started:1606076831437,
+    // poolDrained: Date.now()
+  },
+  pool: ["A","A","A","A","A","A","A","B","B","C","D","D","D","E","E","E","E","E","F","G","G","H","I","I","I","I","I","I","I","K","L","L","L","L","M","M","N","N","N","N","N","O","O","O","O","O","O","P","Q","R","R","R","R","S","S","S","T","T","T","T","T","T","U","U","U","V","W","W","Y","Y"],
+  rows: 6,
+  columns: 6,
+  config: {
+    minPlayers: 2,
+    seed: "0.6fbsr19kvbo1enoq6rgg"},
+  myId: "fakeID",
+  trayTiles: [
+    {"id":1},{"id":2},{"id":7},{"id":10}
+  ],
+  "board": [
+    [null,{"id":3},{"id":5},{"id":6},{"id":13},null],
+    [null,{"id":11},null,null,null,null],
+    [null,{"id":12},{"id":14},{"id":8},{"id":9},{"id":15}],
+    [null,null,null,null,null,null],
+    [null,null,null,null,null,null],
+    [null,null,null,null,null,null]
+  ],
+  "pieces": {
+    "1":{"type":"tile","letter":"E","id":1},
+    "2":{"type":"tile","letter":"V","id":2},
+    "3":{"type":"tile","letter":"R","id":3,"x":1,"y":0},
+    "5":{"type":"tile","letter":"E","id":5,"x":2,"y":0},
+    "6":{"type":"tile","letter":"E","id":6,x:3,y:0},
+    "7":{"type":"tile","letter":"C","id":7},
+    "8":{"type":"tile","letter":"E","id":8,x:3,y:2},
+    "9":{"type":"tile","letter":"E","id":9,x:4,y:2},
+    "10":{"type":"tile","letter":"E","id":10},
+    "11":{"type":"tile","letter":"A","id":11,x:1,y:1},
+    "12":{"type":"tile","letter":"G","id":12,x:1,y:2},
+    "13":{"type":"tile","letter":"D","id":13},
+    "14":{"type":"tile","letter":"R","id":14,x:2,y:2},
+    "15":{"type":"tile","letter":"N","id":15,x:5,y:2}
+  },
+  "_nextId":16
+};
+
+const battleshipTestGame: GameState = {
+  ...testGame,
+  phase: { state: 'battleship', turn: 'fakeID' },
+  pool: [],
+  players: new Map([
+    ["otherPlayer", { name: 'Other User', knownBoard: new Map([
+      ['0,3', { guesserId: 'fakeID', letter: null }],
+      ['5,5', { guesserId: 'fakeID', letter: 'N' }],
+      ['3,3', { guesserId: 'fakeID', letter: 'Z' }],
+    ]) }],
+    ["jugador", { name: "Jugador", knownBoard: new Map([])}],
+    ["fakeID", { name: 'Test User', knownBoard: new Map([
+      ['1,0', { guesserId: 'jugador', letter: 'R' }],
+      ['0,1', { guesserId: 'otherPlayer', letter: null }],
+    ])}],
+  ])
+};
 
 function initApp(server: GameServer): AppState {
   return {
     server,
-    // game: testGame
+    // game: battleshipTestGame
+    game: testGame
   };
 }
 
@@ -213,6 +285,21 @@ export function useGame(): [AppState, Dispatch<ActionType>] {
   const [game, dispatch] = useReducer(gameReducer, server.current, initApp);
 
   useEffect(() => {
+    // server.current.checkpointConfig = {
+    //   autoCheckpoint: 5,
+    //   getter: () => {
+    //     selectKeys(game.game, )
+    //   },
+    //   loader: (checkpoint: SharedGameState) => {
+    //     dispatch({
+    //       type: 'restore_checkpoint',
+    //       payload: {
+    //         checkpoint
+    //       }
+    //     });
+    //   }
+    // };
+
     server.current.handler = (event, server: GameServer) => {
       dispatch({
         type: 'server_action',
@@ -222,7 +309,9 @@ export function useGame(): [AppState, Dispatch<ActionType>] {
         }
       });
     };
-  }, [dispatch]);
+
+    // server.current.on
+  }, [dispatch, server]);
 
   // const wrappedDispatch = useCallback((action => {
   //   const untypedMessage = action as any;

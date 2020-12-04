@@ -1,15 +1,23 @@
 import * as React from 'react';
-
+import { useState } from 'react';
 
 import './App.css';
 
 import { GameState, useGame } from './game/state';
-import { PlacedTile, TileData, PieceId, Coord, CellData, PieceData } from './game/eventReducer';
+import type { PlacedTile, TileData, PieceId, Coord, CoordString, CellData, PieceData,
+              BattleshipPhase as BattleshipPhaseType, BananagramsPhase } from './game/eventReducer';
 import { ActionType, DropTarget } from './game/actions';
+import { useCountdown } from './util/hooks';
+
+import { fitWord } from './game/board';
 import * as $board from './game/board';
+import * as $u from './util';
 
 import JoinScreen from './screen/Join';
 import PregameScreen from './screen/Pregame';
+
+import Countdown from './component/Countdown';
+import Selection, { useSelection } from './component/Selection';
 
 
 type TileProps = {
@@ -24,7 +32,7 @@ const Tile: React.FC<TileProps> = ({ tile, draggable=true }) =>
   </div>;
 
 const TetrominoShape = ({ shape, className }) =>
-    null;
+  null;
 
 interface DragState {
   pieceID: PieceId;
@@ -32,13 +40,13 @@ interface DragState {
   target?: DropTarget;
 }
 
-function getTarget(e): DropTarget {
-  let target: HTMLElement = e.target as HTMLElement;
+function getTarget(e: { target: HTMLElement }): DropTarget {
+  let target = e.target;
   let pieceID: string, coords: string;
 
   while (target) {
-    pieceID = target.getAttribute('data-pieceid');
-    coords = target.getAttribute('data-coords');
+    pieceID = target.getAttribute?.('data-pieceid');
+    coords = target.getAttribute?.('data-coords');
     if (pieceID || coords)
       break;
     target = target.parentElement;
@@ -55,10 +63,10 @@ function getTarget(e): DropTarget {
 
 const isTarget = (target: DropTarget, pieceID: number, coords: Coord=[-1, -1]) => (
   (pieceID && pieceID === target.pieceID)
-  || (target.coords && target.coords[0] == coords[0] && target.coords[1] === coords[1]));
+  || (target.coords && target.coords[0] === coords[0] && target.coords[1] === coords[1]));
 
 const useDragging = (dispatch: React.Dispatch<ActionType>) => {
-  const [dragState, setDragState] = React.useState(null as DragState);
+  const [dragState, setDragState] = useState(null as DragState);
 
   const onDragStart = React.useCallback(e => {
     const target = getTarget(e.nativeEvent);
@@ -113,20 +121,25 @@ const useDragging = (dispatch: React.Dispatch<ActionType>) => {
 
 type BoardProps<T = CellData> = {
   TileComponent?: React.ComponentType<TileProps>,
+  BlankCellComponent?: React.ComponentType<{ row: number, column: number }>,
   className?: string,
   style?: React.CSSProperties,
   dragState?: DragState,
   onDragOver?: any,
   onDragStart?: any,
   onDrop?: any,
+  onClick?: any,
   tiles: Iterable<[Coord, { cell: T, piece: PieceData }]>,
   rows: number,
   columns: number,
+  extraTileProps?: any,
 };
 
 function Board<T extends CellData = CellData>(props: BoardProps<T>) {
-  const { tiles, TileComponent = Tile, dragState, onDragStart, onDragOver,
-          onDrop, rows, className = ''} = props;
+  const { tiles, TileComponent = Tile, BlankCellComponent, dragState,
+  onDragStart, onDragOver, onDrop, onClick, rows, className = '', extraTileProps
+  = {} } = props; 
+    // Error when 
   const renderedIds = {};
 
   return (
@@ -176,17 +189,19 @@ function Board<T extends CellData = CellData>(props: BoardProps<T>) {
           const isDropTarget = dropTarget && isTarget(dropTarget, id, [c, r]);
 
           return (
-            <div className={"tile-wrapper" + (blank ? ' blank' : '') +
-                                                  (tetro ? ' tetromino' : '') +
-                                                  (isDropTarget ? ' drop-target' : '')}
+            <div className={$u.classnames(
+              "tile-wrapper", { blank: blank, tetromino: tetro, 'drop-target': isDropTarget }
+            )}
                  data-coords={[c, r]}
                  style={style}
                  key={id || `${c}-${r}`} >
-              {blank ? null :
+              {blank ? (BlankCellComponent ?
+                        <BlankCellComponent row={r} column={c} {...extraTileProps} />
+                        : null) :
                tetro ? <TetrominoShape shape={tetro}
                                        className={`tetromino ${tetroClasses}`}
                /> :
-               <TileComponent tile={piece as PlacedTile} data={cell} />}
+               <TileComponent tile={piece as PlacedTile} data={cell} {...extraTileProps} />}
             </div>
           );
         })}
@@ -216,27 +231,252 @@ type BananaPhaseProps = {
 };
 
 const BananaPhase: React.FC<BananaPhaseProps> = ({ game, dispatch }) => {
+  const { poolDrained } = game.phase as BananagramsPhase;
   const dragging = useDragging(dispatch);
+  const countdown = useCountdown(poolDrained && poolDrained + 30000);
+  const selected = useSelection({
+    selector: '.tile',
+    getID: elt => elt.getAttribute('data-pieceid'),
+    ignore: '[draggable]',
+  });
+
+  const isOver = countdown === 0;
+
+  const islands = React.useMemo(() => {
+    return $board.getIslands(game);
+  }, [game.pieces])
+  const isleCount = islands.length - 1;
+
   const trayTiles = game.trayTiles.map(({ id }) => game.pieces[id]);
 
   return (
     <>
-      <div className="pool">
-        {game.pool.length} letters remaining!
-      </div>
+      <h3 className="instructions">
+        Form connected words with your tiles. When your tray is empty, you can <strong>Draw</strong> more. When anyone draws, everyone draws--so be quick!
+      </h3>
+      {isleCount > 0 &&
+       <h4 className="warning">
+         You have {isleCount} isolated "island{isleCount === 1 ? '' : 's'}" of tiles. Connect them before the next phase, or you will lose those tiles!
+       </h4>}
+      {
+        poolDrained ?
+        <Countdown ms={countdown} /> :
+        <div className="pool">
+          {game.pool.length} letters remaining!
+        </div>
+      }
       <div className="board-container">
         <Board tiles={$board.iterPieces(game)}
                rows={game.rows}
                columns={game.columns}
-               {...dragging}
+               {...(isOver ? {} : dragging)}
         />
       </div>
-      <Tray tiles={trayTiles as TileData[]} onDragStart={dragging.onDragStart} />
-      {!trayTiles.length &&
-       <button onClick={() => { dispatch({ type: 'draw' }); }}>
-         Draw!
-       </button>}
+      {
+        isOver ?
+        (
+          game.ownerId === game.myId ?
+          <button onClick={() => { dispatch({ type: 'battleship' }); }}>Man Your Battlestations!</button> :
+          <div>Prepping battleships...</div>
+        ) :
+        (trayTiles.length ?
+         <Tray tiles={trayTiles as TileData[]} onDragStart={dragging.onDragStart} /> :
+         <button onClick={() => { dispatch({ type: 'draw' }); }} disabled={!!poolDrained}>
+           {poolDrained ? 'No More Tiles' : 'Draw'}
+         </button>)
+      }
     </>
+  );
+};
+
+type FittingTiles = { [k in CoordString]: string };
+type BattleshipTileProps = TileProps & {
+  players: GameState["players"],
+  targeted: Coord,
+  fittingTiles?: FittingTiles,
+};
+
+const BattleshipTile: React.FC<BattleshipTileProps> = props => {
+  const { players, targeted, fittingTiles = {} } = props;
+  const tile = props.tile as $board.BattleshipTile;
+  const { guesserId, letter, hidden } = tile;
+  const { name } = players.get(guesserId) || {};
+  const title = hidden ?
+                'No one has guessed this tile yet!' :
+                (`${name} targeted this tile and ` + (letter ? `hit "${letter}!"` : 'missed!'));
+
+  const isTargeted = tile.x === targeted?.[0] && tile.y === targeted?.[1];
+  const fitting = fittingTiles[`${tile.x},${tile.y}`];
+
+  return (
+    <div className={$u.classnames({ tile: letter,
+                                    'hit-tile': letter && !hidden,
+                                    hidden: hidden,
+                                    miss: !letter,
+                                    targeting: isTargeted,
+                                    fitting: !!fitting })}
+         title={title}>
+      {!hidden &&
+       <div className="overlay">
+         { letter ? '\u25CB' : fitting || '\u00D7' }
+       </div>}
+      {letter}
+    </div>
+  );
+};
+
+type BattleshipCellProps = {
+  row: number,
+  column: number,
+  targeted: Coord,
+  fittingTiles: FittingTiles
+};
+const BattleshipCell: React.FC<BattleshipCellProps> = ({ row, column, targeted, fittingTiles }) => {
+    const fitting = fittingTiles[`${column},${row}`];
+
+    return (
+      (row === targeted[1] && column === targeted[0])
+      ? <div className={$u.classnames("targeting overlay", { fitting: !!fitting })}>
+        {fitting || '*'}
+      </div>
+      : fitting
+      ? <div className="fitting">{fitting}</div>
+      : null);
+  };
+
+type BattleshipPhaseProps = {
+  game: GameState,
+  dispatch: (action: ActionType) => any
+};
+
+const BattleshipPhase: React.FC<BattleshipPhaseProps> = ({ game, dispatch }) => {
+  const { turn } = game.phase as BattleshipPhaseType;
+  const { myId, players } = game;
+  const player = players.get(turn);
+  const myTurn = turn === myId;
+
+  const [[targetedId, targetedCoords], setTargeting] = useState([null, null] as [string, Coord]);
+  let [guessedWord, setGuessedWord] = useState('');
+  const [launching, setLaunching] = useState(false);
+
+  const onSelect = React.useCallback(e => {
+    const { 'data-coords': coords, 'data-playerid': targetId } =
+      $u.getAttributes(e, ['data-coords', 'data-playerid']);
+
+    if (!coords || !targetId || targetId === game.myId) {
+      setTargeting([null, null]);
+      return;
+    }
+
+    setTargeting([
+      targetId,
+      coords.split(',').map(x => parseInt(x)) as Coord
+    ]);
+
+    e.preventDefault();
+    e.stopPropagation();
+  }, [game.players]);
+
+  const onLaunch = React.useCallback(e => {
+    dispatch(Object.assign({
+      type: 'guess',
+      targetId: targetedId,
+      coord: targetedCoords,
+    }, guessedWord && {
+      type: 'word',
+      dir: [1, 0],
+      guess: guessedWord,
+    }) as ActionType);
+
+    setLaunching(true);
+
+    e.preventDefault();
+    e.stopPropagation();
+  }, [targetedId, targetedCoords, guessedWord, dispatch]);
+
+  const onChangeGuessText = React.useCallback(e => {
+    setGuessedWord(e.currentTarget.value);
+  }, []);
+
+  React.useEffect(() => {
+    // Runs at the beginning and end of the player's turn
+    setTargeting([null, null]);
+    setLaunching(false);
+  }, [myTurn]);
+
+  let fittingTiles = {};
+  if (targetedId && targetedCoords && guessedWord) {
+    const bestFits = fitWord(game.players.get(targetedId).knownBoard, targetedCoords, guessedWord, game)
+      .reduce((fits, fit) => {
+        if (!fits.length || fit.word.length > fits[0].word.length)
+          return [fit];
+
+        if (fits[0].word.length === fit.word.length)
+          fits.push(fit);
+
+        return fits;
+      }, [] as ReturnType<typeof fitWord>);
+
+    for (const fit of bestFits) {
+      for (const tile of fit.tiles) {
+        fittingTiles[`${tile.x},${tile.y}`] = tile.letter;
+      }
+    }
+
+    guessedWord = bestFits[0]?.word;
+  }
+
+  const opponentBoards = [];
+  players.forEach((_, playerId) => {
+    const targeted = playerId === targetedId;
+    opponentBoards.push(
+      <div className={$u.classnames('opponent', { 'my-board': playerId === game.myId })}
+           key={playerId}
+           data-playerid={playerId}>
+        <Board tiles={$board.iterBattleshipBoard(game, playerId)}
+               rows={game.rows}
+               columns={game.columns}
+               TileComponent={BattleshipTile}
+               BlankCellComponent={targeted ? BattleshipCell : null}
+               extraTileProps={{ players: game.players,
+                                 myBoard: playerId === game.myId && game.board,
+                                 targeted: targeted ? targetedCoords : null,
+                                 fittingTiles: targeted && fittingTiles }}
+        />
+        <h2>
+          {targeted ? <div className="reticule">{'>>'}</div> : ''}
+          {players.get(playerId).name}
+          {targeted ? <div className="reticule">{'<<'}</div> : ''}
+        </h2>
+      </div>
+    );
+  });
+
+  return (
+    <div className={$u.classnames('battleship', { 'my-turn': myTurn })}>
+      <h3 className="instructions">
+        {myTurn ?
+         launching ? 'Launching...' : 'Pick a target!' :
+         `${player.name} is picking a target...`}
+      </h3>
+      <div className="battleship-opponents" onClick={myTurn ? onSelect : null}>
+        {opponentBoards}
+      </div>
+
+      <div className="controls-wrapper">
+        <div className="launch-controls">
+          <button disabled={!targetedCoords} onClick={onLaunch}>
+            {!targetedCoords ? 'Aim!' : 'Launch!'}
+          </button>
+          <label>
+            Guess Word<br/>
+            <input type="text"
+                   value={guessedWord}
+                   onChange={onChangeGuessText} />
+          </label>
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -252,14 +492,15 @@ const GameScreen: React.FunctionComponent<GameScreenProps> = ({ game, dispatch }
     <div className="game">
       <div className="game-info">
         <h1>{game.name}</h1>
-        Game ID: {game.gameId}
       </div>
 
       {phase === 'pregame'
       ? <PregameScreen game={game} dispatch={dispatch} />
       : phase === 'bananagrams'
       ? <BananaPhase game={game} dispatch={dispatch} />
-      : <div />
+      : phase === 'battleship'
+      ? <BattleshipPhase game={game} dispatch={dispatch} />
+      : <div/>
       }
     </div>
   );
@@ -276,12 +517,14 @@ function App() {
   const [app, dispatch] = useGame();
 
   return (
-    <div className="App">
-      {
-        app.game ? <GameScreen game={app.game} dispatch={dispatch} /> : 
-        <JoinScreen game={app.game} dispatch={dispatch} />
-      }
-    </div>
+    <Selection>
+      <div className="App">
+        {
+          app.game ? <GameScreen game={app.game} dispatch={dispatch} /> : 
+          <JoinScreen game={app.game} dispatch={dispatch} />
+        }
+      </div>
+    </Selection>
   );
 }
 

@@ -1,17 +1,17 @@
-import { getLetter, isValidCoord } from "./board";
+import { getIslands, getLetter, isValidCoord, wordMatches } from "./board";
 import Server, { EventMessage, GameConfig } from "./server";
-import { nextKey } from './util';
+import { concat, map, nextKey } from './util';
 
 // playerBoard- [ [3,6]: "b", [7,8]: null, [18,6]: "u"]
-type PregamePhase = { state: 'pregame' };
-type BananagramsPhase = {
+export type PregamePhase = { state: 'pregame' };
+export type BananagramsPhase = {
   state: 'bananagrams',
   started: number,
   /** Timestamp when the pool was drained */
   poolDrained?: number
 };
-type BattleshipPhase = { state: 'battleship', turn: string };
-type GamePhase = PregamePhase | BananagramsPhase | BattleshipPhase;
+export type BattleshipPhase = { state: 'battleship', turn: string, waitingForResponse?: boolean };
+export type GamePhase = PregamePhase | BananagramsPhase | BattleshipPhase;
 
 // Local game state ///////////////////////////////////////////////////////////
 export interface PlacedPieceData {
@@ -90,7 +90,7 @@ export interface ActionResult<S extends SharedGameState = SharedGameState, T=Eve
 }
 
 //https://hasbro-new.custhelp.com/app/answers/detail/a_id/19/~/how-many-of-each-letter-tile-are-included-in-a-scrabble-game%3F
-const letters = {
+const LetterCounts = {
   A: 9,
   B: 2,
   C: 2,
@@ -117,7 +117,7 @@ const letters = {
   X: 1,
   Y: 2,
   Z: 1,
-  Blank: 2
+  // Blank: 2
 };
 
 const randomIndex = (pool: any[], rand=Math.random) => {
@@ -134,14 +134,15 @@ function updateMap<K, V>(m: Map<K, V>, k: K, fn: (val: V) => V): Map<K, V> {
 const initBoard = (rows: number, cols: number): BoardState =>
   Array(rows).fill(null).map(() => Array(cols).fill(null));
 
-type CoordString = string;
+export type CoordString = string;
 export type KnownData = {
-  guesserId: string,
+  guesserId?: string,
   letter?: string | null
 };
+export type KnownBoard = Map<CoordString, KnownData>;
 type PlayerData = {
   name: string,
-  knownBoard: Map<CoordString, KnownData>,
+  knownBoard: KnownBoard,
 };
 type PlayerOptions = Partial<Pick<PlayerData, 'name'>>;
 
@@ -155,9 +156,9 @@ type ActionFn<T = EventPayload, S extends SharedGameState = SharedGameState> =
 const initGame: ActionFn<InitPayload> = (_, event, server) => {
   const myId = server.userId;
 
-  const { columns = 6, rows = 6, name = '', ownerName } = event.payload;
-  const pool = Object.keys(letters).reduce((pool, letter) => {
-    for (let i = letters[letter]; i > 0; --i)
+  const { columns = 8, rows = 8, name = '', ownerName } = event.payload;
+  const pool = Object.keys(LetterCounts).reduce((pool, letter) => {
+    for (let i = Math.ceil(LetterCounts[letter]/2); i > 0; --i)
       pool.push(letter);
     return pool;
   }, []);
@@ -212,7 +213,7 @@ function _joinGame(state: SharedGameState, userId: string, options: PlayerOption
 
 const joinGame: ActionFn<JoinPayload> = (state, event) => (_joinGame(state, event.sender, { name: event.payload.name }));
 
-const leaveGame: ActionFn<LeavePayload> = (state, event) => {
+const leaveGame: ActionFn<LeavePayload> = (state, _event) => {
   // TODO
   return { state };
 }
@@ -293,7 +294,7 @@ const draw: ActionFn<DrawPayload> = (state, event) => {
   return { state: newState };
 };
 
-const startBattleship: ActionFn<StartBattleship> = (state, event) => {
+const startBattleship: ActionFn<StartBattleship> = (state, _event) => {
   if (state.pool.length) {
     return {
       state,
@@ -304,13 +305,52 @@ const startBattleship: ActionFn<StartBattleship> = (state, event) => {
   // TODO Potentially add a required delay between when the pool is drained and
   // when the battleship phase can begin
 
+  const phase: BattleshipPhase = {
+    state: 'battleship',
+    turn: nextKey(state.players)
+  };
+
+  // Remove all but the largest "island"s of tiles from the board. If more than
+  // one island is the largest, an arbitrary one is kept. (It ends up being
+  // dependent on the order in which the game.pieces object's keys are
+  // traversed. I see some potential problems here for repeatability if at some
+  // point we restore local state across reloads, but a small tweak would fix
+  // this).
+  const islands = getIslands(state);
+  if (islands.length > 1) {
+    const trayTiles = [...state.trayTiles];
+    const pieces = {...state.pieces};
+    const board = state.board.map(row => [...row]);
+
+    const [, largeIdx] = islands.reduce(
+      (lg, isle, i) => (isle.length > lg[0] ? [isle.length, i] : lg),
+      [0, -1]);
+    islands.forEach((isle, idx) => {
+      if (idx !== largeIdx) {
+        for (const pieceId of isle) {
+          const piece = {...pieces[pieceId]} as PlacedPiece;
+          board[piece.y][piece.x] = null;
+          delete piece['x'];
+          delete piece['y'];
+          trayTiles.push({ id: parseInt(pieceId) });
+        }
+      }
+    });
+
+    return {
+      state: {
+        ...state,
+        trayTiles,
+        pieces,
+        board
+      }
+    };
+  }
+
   return {
     state: {
       ...state,
-      phase: {
-        state: 'battleship',
-        turn: nextKey(state.players)
-      }
+      phase,
     }
   };
 };
@@ -388,8 +428,84 @@ const answer: ActionFn<AnswerPayload> = (state, event) => {
   };
 }
 
-const guessWord: ActionFn<GuessWordPayload> = (state, _event) => {
-  return { state };
+const reveal: ActionFn<RevealPayload> = (state, event) => {
+  const players = updateMap(
+    state.players, event.sender,
+    target => ({
+      ...target,
+      knownBoard: new Map(concat(map(event.payload.board,
+                                     ([coord, letter]) => ([coord.join(','), { letter }] as [string, KnownData])),
+                                 target.knownBoard.entries()))
+    }));
+
+  return {
+    state: {
+      ...state,
+      players
+    },
+  };
+};
+
+const guessWord: ActionFn<GuessWordPayload> = (state, event) => {
+  const { sender, payload } = event;
+  const phase = state.phase as BattleshipPhase;
+
+  if (phase.turn !== sender || phase.waitingForResponse)
+    return {
+      state,
+      error: "It's not your turn"
+    };
+
+  if (!isValidCoord(state, payload.coord)) {
+    return {
+      state,
+      error: "Invalid coordinate"
+    };
+  }
+
+  // TODO Validate the direction
+
+  return Object.assign({ 
+    state: {
+      ...state,
+      phase: {
+        ...state.phase,
+        waitingForResponse: true
+      }
+    }
+   }, payload.targetId === state.myId && {
+    response: {
+      type: 'word_response',
+      coord: payload.coord,
+      dir: payload.dir,
+      guess: payload.guess,
+      isHit: wordMatches(state, payload.guess, payload.coord, payload.dir)
+    } as GuessWordAnswerPayload
+  });
+};
+
+const guessWordResponse: ActionFn<GuessWordAnswerPayload> = (state, event) => {
+  const { payload, sender } = event;
+  const phase = state.phase as BattleshipPhase;
+  const { coord, dir } = payload;
+  
+  const idxToCoordStr = idx => ([coord[0] + (dir[0]*idx), coord[1] + (dir[1]*idx)].join(','));
+
+  return {
+    state: {
+      ...state,
+      phase: {
+        state: 'battleship',
+        turn: payload.isHit ? phase.turn : nextKey(state.players, phase.turn),
+      },
+      players: updateMap(state.players, sender, target => (
+        payload.isHit ? {
+        ...target,
+        knownBoard: new Map(Array.from(target.knownBoard.entries())
+                                      .concat(Array.from(payload.guess, (char, idx) => ([idxToCoordStr(idx), { letter: char, guesserId: phase.turn }]))))
+      } : target))
+    }
+  };
 };
 
 export type InitPayload = {
@@ -413,9 +529,15 @@ export type GuessPayload = {
 /** Response from the target of a guess */
 type AnswerPayload = {
   type: 'answer',
-  coord: [number, number],
+  coord: Coord,
   /** The value of the tile at the coordinate, or null if a miss */
   answer: string | null
+};
+
+/** Player reveals their board */
+type RevealPayload = {
+  type: 'reveal',
+  board: [Coord, string?][],
 };
 
 /** Attempt to complete a partly revealed word on an opponent's board */
@@ -423,8 +545,17 @@ export type GuessWordPayload = {
   type: 'word',
   targetId: string,
   guess: string,
-  /** Any coordinate that falls inside the word */
+  /** Start coordinate of the word */
   coord: [number, number],
+  dir: [1, 0] | [0, -1],
+};
+
+export type GuessWordAnswerPayload = {
+  type: 'word_response',
+  coord: Coord,
+  dir: GuessWordPayload["dir"],
+  guess: string,
+  isHit: boolean,
 };
 
 export type EventPayload =
@@ -436,7 +567,9 @@ export type EventPayload =
   | StartBattleship
   | GuessPayload
   | AnswerPayload
-  | GuessWordPayload;
+  | RevealPayload
+  | GuessWordPayload
+  | GuessWordAnswerPayload;
 
 type ActionFnWrapper<ExtraArgs extends any[] = []> = (fn: ActionFn, ...rest: ExtraArgs) => ActionFn;
 
@@ -467,7 +600,9 @@ export const EventHandlers: { [k in EventPayload["type"]]: ActionFn } = {
   'battleship': _owner(_inPhase(startBattleship, 'bananagrams')),
   'guess': _inPhase(guess, 'battleship'),
   'answer': _inPhase(answer, 'battleship'),
+  'reveal': _inPhase(answer, 'battleship'),
   'word': _inPhase(guessWord, 'battleship'),
+  'word_response': _inPhase(guessWordResponse, 'battleship'),
 };
 
 
