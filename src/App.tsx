@@ -260,7 +260,9 @@ const BananaPhase: React.FC<BananaPhaseProps> = ({ game, dispatch }) => {
        </h4>}
       {
         poolDrained ?
-        <Countdown ms={countdown} /> :
+        <div className="countdown-container">
+          <Countdown ms={countdown} />
+        </div> :
         <div className="pool">
           {game.pool.length} letters remaining!
         </div>
