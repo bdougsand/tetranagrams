@@ -326,7 +326,10 @@ export function *iterCells<T>(rows: number, columns: number, getData: CellDataGe
   }
 }
 
-export function *iterPieces(game: GameState): BoardIterator {
+/**
+ * Iterates over every cell of the board
+ */
+export function *iterPieces(game: HasBoard & HasGrid): BoardIterator {
   yield *iterCells(game.rows, game.columns,
                    (x, y) => {
                      const cell = game.board[y][x];
@@ -418,4 +421,18 @@ export function fitWord(board: KnownBoard, coord: Coord, word: string, grid: Has
   }
 
   return result;
+}
+
+/**
+ * Returns an array of tiles that have not yet been revealed.
+ */
+export function hiddenTiles(game: Pick<GameState, 'players' | 'myId'> & HasBoard & HasGrid) {
+  const known = game.players.get(game.myId).knownBoard;
+  const pieces: PieceData[] = [];
+  for (const [[x, y], { piece }] of iterPieces(game)) {
+    if (piece && !known.has(`${x},${y}`))
+      pieces.push(piece);
+  }
+
+  return pieces;
 }

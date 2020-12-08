@@ -67,3 +67,7 @@ export function getAttributes<K extends string>(e: { target: HTMLElement }, attr
 
   return data;
 }
+
+export function pluralize(n: number, singular: string, plural: string = `${singular}s`) {
+  return n === 1 ? `${n} ${singular}` : `${n} ${plural}`;
+}

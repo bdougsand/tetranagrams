@@ -385,7 +385,8 @@ const BattleshipPhase: React.FC<BattleshipPhaseProps> = ({ game, dispatch }) => 
     const { 'data-coords': coords, 'data-playerid': targetId } =
       $u.getAttributes(e, ['data-coords', 'data-playerid']);
 
-    if (!coords || !targetId || targetId === game.myId) {
+    if (!coords || !targetId || targetId === game.myId ||
+        !players.get(targetId)?.remaining) {
       setTargeting([null, null]);
       return;
     }
@@ -451,8 +452,12 @@ const BattleshipPhase: React.FC<BattleshipPhaseProps> = ({ game, dispatch }) => 
   const opponentBoards = [];
   players.forEach((_, playerId) => {
     const targeted = playerId === targetedId;
+    const player = players.get(playerId);
     opponentBoards.push(
-      <div className={$u.classnames('opponent', { 'my-board': playerId === game.myId })}
+      <div className={$u.classnames('opponent', {
+        'my-board': playerId === game.myId,
+        'completed': player.remaining === 0
+      })}
            key={playerId}
            data-playerid={playerId}>
         <Board tiles={$board.iterBattleshipBoard(game, playerId)}
@@ -467,9 +472,12 @@ const BattleshipPhase: React.FC<BattleshipPhaseProps> = ({ game, dispatch }) => 
         />
         <h2>
           {targeted ? <div className="reticule">{'>>'}</div> : ''}
-          {players.get(playerId).name}
+          {player.name}
           {targeted ? <div className="reticule">{'<<'}</div> : ''}
         </h2>
+        <div className="player-details">
+          {(isNaN(player.remaining) ? '??? tiles' : $u.pluralize(player.remaining, 'tile')) + ' remaining'}
+        </div>
       </div>
     );
   });

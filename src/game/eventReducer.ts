@@ -11,7 +11,13 @@ export type BananagramsPhase = {
   /** Timestamp when the pool was drained */
   poolDrained?: number
 };
-export type BattleshipPhase = { state: 'battleship', turn: string, waitingForResponse?: boolean };
+export type BattleshipPhase = {
+  state: 'battleship',
+  turn: string,
+  waitingForResponse?: boolean,
+  /** Timestamp */
+  complete?: number,
+};
 export type GamePhase = PregamePhase | BananagramsPhase | BattleshipPhase;
 
 // Local game state ///////////////////////////////////////////////////////////
@@ -132,6 +138,17 @@ function updateMap<K, V>(m: Map<K, V>, k: K, fn: (val: V) => V): Map<K, V> {
   return new Map(m).set(k, fn(m.get(k)));
 }
 
+function battleshipComplete(state: SharedGameState) {
+  let count = 0;
+  for (const { remaining } of state.players.values()) {
+    if (remaining) {
+      if (++count > 1) return false;
+    }
+  }
+
+  return count <= 1;
+}
+
 const initBoard = (rows: number, cols: number): BoardState =>
   Array(rows).fill(null).map(() => Array(cols).fill(null));
 
@@ -144,6 +161,7 @@ export type KnownBoard = Map<CoordString, KnownData>;
 type PlayerData = {
   name: string,
   knownBoard: KnownBoard,
+  remaining?: number,
 };
 type PlayerOptions = Partial<Pick<PlayerData, 'name'>>;
 
@@ -342,6 +360,7 @@ const startBattleship: ActionFn<StartBattleship> = (state, _event) => {
     return {
       state: {
         ...state,
+        phase,
         trayTiles,
         pieces,
         board
@@ -405,6 +424,7 @@ const guess: ActionFn<GuessPayload> = (state, event) => {
       type: 'answer',
       coord: payload.coord,
       answer: $board.getLetter(state, ...payload.coord),
+      remaining: $board.hiddenTiles(state).length,
     } as AnswerPayload
   });
 };
@@ -419,15 +439,19 @@ const answer: ActionFn<AnswerPayload> = (state, event) => {
       knownBoard: updateMap(target.knownBoard, coordStr, known => ({
         ...known,
         letter: event.payload.answer
-      }))
+      })),
+      remaining: event.payload.remaining,
     }));
 
-  return {
-    state: {
-      ...state,
-      players
-    },
+  const newState = {
+    ...state,
+    players
   };
+
+  if (battleshipComplete(newState))
+    newState.phase = { ...(state.phase as BattleshipPhase), complete: event.timestamp };
+
+  return { state: newState };
 }
 
 const reveal: ActionFn<RevealPayload> = (state, event) => {
@@ -490,9 +514,10 @@ const guessWordResponse: ActionFn<GuessWordAnswerPayload> = (state, event) => {
   const { payload, sender } = event;
   const phase = state.phase as BattleshipPhase;
   const { coord, dir } = payload;
-  
+
   const idxToCoordStr = idx => ([coord[0] + (dir[0]*idx), coord[1] + (dir[1]*idx)].join(','));
 
+  // XXX Should players with no hidden tiles still be allowed to guess?
   return {
     state: {
       ...state,
@@ -533,7 +558,9 @@ type AnswerPayload = {
   type: 'answer',
   coord: Coord,
   /** The value of the tile at the coordinate, or null if a miss */
-  answer: string | null
+  answer: string | null,
+  /** Number of tiles on the player's board that have not yet been revealed */
+  remaining: number,
 };
 
 /** Player reveals their board */
