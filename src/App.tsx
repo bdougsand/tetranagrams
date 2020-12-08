@@ -27,7 +27,7 @@ type TileProps = {
 };
 
 const Tile: React.FC<TileProps> = ({ tile, draggable=true }) =>
-  <div className="tile" draggable={draggable} data-pieceid={tile.id}>
+  <div className="tile" draggable={draggable} data-pieceid={tile.id} data-tilevalue={tile.letter}>
     {tile.letter}
   </div>;
 
@@ -133,13 +133,13 @@ type BoardProps<T = CellData> = {
   rows: number,
   columns: number,
   extraTileProps?: any,
+  isSelected?: (column: number, row: number, pieceId: number) => boolean,
 };
 
 function Board<T extends CellData = CellData>(props: BoardProps<T>) {
   const { tiles, TileComponent = Tile, BlankCellComponent, dragState,
-  onDragStart, onDragOver, onDrop, onClick, rows, className = '', extraTileProps
-  = {} } = props; 
-    // Error when 
+          onDragStart, onDragOver, onDrop, rows, className = '', isSelected,
+          extraTileProps = {} } = props;
   const renderedIds = {};
 
   return (
@@ -190,37 +190,47 @@ function Board<T extends CellData = CellData>(props: BoardProps<T>) {
 
           return (
             <div className={$u.classnames(
-              "tile-wrapper", { blank: blank, tetromino: tetro, 'drop-target': isDropTarget }
+              "tile-wrapper", {
+                blank: blank,
+                tetromino: tetro,
+                'drop-target': isDropTarget,
+                'selected': isSelected?.(c, r, id),
+              }
             )}
                  data-coords={[c, r]}
                  style={style}
                  key={id || `${c}-${r}`} >
               {blank ? (BlankCellComponent ?
                         <BlankCellComponent row={r} column={c} {...extraTileProps} />
-                        : null) :
+                      : null) :
                tetro ? <TetrominoShape shape={tetro}
                                        className={`tetromino ${tetroClasses}`}
                /> :
-               <TileComponent tile={piece as PlacedTile} data={cell} {...extraTileProps} />}
+               <TileComponent tile={piece as PlacedTile}
+                              data={cell}
+                              draggable={!!onDragStart}
+                              {...extraTileProps} />}
             </div>
           );
         })}
     </div>
   );
-  };
+};
 
 type TrayProps = {
   tiles: TileData[],
   onDragStart?: any,
+  renderEmpty?: React.ReactChild,
 };
 
-const Tray: React.FunctionComponent<TrayProps> = ({ onDragStart, tiles }) => {
+const Tray: React.FunctionComponent<TrayProps> = ({ onDragStart, tiles, renderEmpty }) => {
   return (
-    <div className="tile-tray"
+    <div className={$u.classnames("tile-tray", { empty: !tiles.length })}
          onDragStart={onDragStart}
          data-dragsource="tray"
     >
       {tiles.map(tile => <Tile tile={tile} draggable={!!onDragStart} key={tile.id} />)}
+      {!tiles.length ? renderEmpty : null}
     </div>
   );
 };
@@ -234,13 +244,15 @@ const BananaPhase: React.FC<BananaPhaseProps> = ({ game, dispatch }) => {
   const { poolDrained } = game.phase as BananagramsPhase;
   const dragging = useDragging(dispatch);
   const countdown = useCountdown(poolDrained && poolDrained + 30000);
+  const isOver = countdown === 0;
   const selected = useSelection({
     selector: '.tile',
     getID: elt => elt.getAttribute('data-pieceid'),
     ignore: '[draggable]',
   });
-
-  const isOver = countdown === 0;
+  const isSelected = React.useCallback(
+    (_c, _r, id) => (id && !isOver && selected.has(''+id)),
+    [selected]);
 
   const islands = React.useMemo(() => {
     return $board.getIslands(game);
@@ -271,22 +283,30 @@ const BananaPhase: React.FC<BananaPhaseProps> = ({ game, dispatch }) => {
         <Board tiles={$board.iterPieces(game)}
                rows={game.rows}
                columns={game.columns}
+               isSelected={isSelected}
                {...(isOver ? {} : dragging)}
         />
       </div>
-      {
-        isOver ?
-        (
-          game.ownerId === game.myId ?
-          <button onClick={() => { dispatch({ type: 'battleship' }); }}>Man Your Battlestations!</button> :
-          <div>Prepping battleships...</div>
-        ) :
-        (trayTiles.length ?
-         <Tray tiles={trayTiles as TileData[]} onDragStart={dragging.onDragStart} /> :
-         <button onClick={() => { dispatch({ type: 'draw' }); }} disabled={!!poolDrained}>
-           {poolDrained ? 'No More Tiles' : 'Draw'}
-         </button>)
-      }
+      <div className="bottom">
+        {
+          isOver ?
+          (
+            game.ownerId === game.myId ?
+            <button onClick={() => { dispatch({ type: 'battleship' }); }}>
+              Man Your Battlestations!
+            </button> :
+            <div>Prepping battleships...</div>
+          ) :
+          <Tray tiles={trayTiles as TileData[]}
+                onDragStart={dragging.onDragStart}
+                renderEmpty={
+                  <button onClick={() => { dispatch({ type: 'draw' }); }}
+                          disabled={!!poolDrained}>
+                    {poolDrained ? 'No tiles remaining' : 'Draw'}
+                  </button>
+                }/>
+        }
+      </div>
     </>
   );
 };
