@@ -64,6 +64,25 @@ export function *concat<T>(...iterables: Iterable<T>[]) {
     yield *it;
 }
 
+export function zip<S, T>(itA: Iterable<S>, itB: Iterable<T>): Generator<[S, T]>;
+export function zip<S, T, U>(itA: Iterable<S>, itB: Iterable<T>, itC: Iterable<U>): Generator<[S, T, U]>;
+export function zip<S, T, U, V>(itA: Iterable<S>, itB: Iterable<T>, itC: Iterable<U>, itD: Iterable<V>): Generator<[S, T, U, V]>;
+export function zip<S, T, U, V, W>(itA: Iterable<S>, itB: Iterable<T>, itC: Iterable<U>, itD: Iterable<V>, itE: Iterable<W>): Generator<[S, T, U, V, W]>;
+export function *zip(...iterables: any[]) {
+  const iterators = iterables.map(it => it[Symbol.iterator]());
+
+  while (true) {
+    const nextVals = [];
+    for (const it of iterators) {
+      const next = it.next();
+      if (next.done)
+        return;
+      nextVals.push(next.value);
+    }
+    yield nextVals;
+  }
+}
+
 type Reducer<T, S> = (result: S, currentVal: T, index: number) => S;
 export function reduce<T, S=T>(xs: Iterable<T>, fn: Reducer<T, S>, init?: S) {
   const iter = xs[Symbol.iterator]();
