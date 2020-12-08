@@ -1,4 +1,5 @@
-import { getIslands, getLetter, isValidCoord, wordMatches } from "./board";
+import * as $board from './board';
+import { isValidCoord } from "./board";
 import Server, { EventMessage, GameConfig } from "./server";
 import { concat, map, nextKey } from './util';
 
@@ -316,7 +317,7 @@ const startBattleship: ActionFn<StartBattleship> = (state, _event) => {
   // traversed. I see some potential problems here for repeatability if at some
   // point we restore local state across reloads, but a small tweak would fix
   // this).
-  const islands = getIslands(state);
+  const islands = $board.getIslands(state);
   if (islands.length > 1) {
     const trayTiles = [...state.trayTiles];
     const pieces = {...state.pieces};
@@ -332,6 +333,7 @@ const startBattleship: ActionFn<StartBattleship> = (state, _event) => {
           board[piece.y][piece.x] = null;
           delete piece['x'];
           delete piece['y'];
+          pieces[pieceId] = piece;
           trayTiles.push({ id: parseInt(pieceId) });
         }
       }
@@ -402,7 +404,7 @@ const guess: ActionFn<GuessPayload> = (state, event) => {
     response: {
       type: 'answer',
       coord: payload.coord,
-      answer: getLetter(state, ...payload.coord)
+      answer: $board.getLetter(state, ...payload.coord),
     } as AnswerPayload
   });
 };
@@ -465,7 +467,7 @@ const guessWord: ActionFn<GuessWordPayload> = (state, event) => {
 
   // TODO Validate the direction
 
-  return Object.assign({ 
+  return Object.assign({
     state: {
       ...state,
       phase: {
@@ -479,7 +481,7 @@ const guessWord: ActionFn<GuessWordPayload> = (state, event) => {
       coord: payload.coord,
       dir: payload.dir,
       guess: payload.guess,
-      isHit: wordMatches(state, payload.guess, payload.coord, payload.dir)
+      isHit: $board.wordMatches(state, payload.guess, payload.coord, payload.dir)
     } as GuessWordAnswerPayload
   });
 };
@@ -600,7 +602,7 @@ export const EventHandlers: { [k in EventPayload["type"]]: ActionFn } = {
   'battleship': _owner(_inPhase(startBattleship, 'bananagrams')),
   'guess': _inPhase(guess, 'battleship'),
   'answer': _inPhase(answer, 'battleship'),
-  'reveal': _inPhase(answer, 'battleship'),
+  'reveal': _inPhase(reveal, 'battleship'),
   'word': _inPhase(guessWord, 'battleship'),
   'word_response': _inPhase(guessWordResponse, 'battleship'),
 };

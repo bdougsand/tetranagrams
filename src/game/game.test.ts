@@ -1,6 +1,8 @@
 import seedrandom from 'seedrandom';
+import { getIslands } from './board';
 
 import { ActionResult, EventPayload, handleMessage, SharedGameState } from './eventReducer';
+import { GameState } from './state';
 
 
 test('', () => {
@@ -103,6 +105,58 @@ test('', () => {
     console.log(id, Array.from(state.players.get(id).knownBoard.entries()));
   }
 
+  {
+    // Test that 'islands' are cleaned up when transitioning to Battleships
+    let newState: GameState = {
+      ...state,
+      phase: { state: 'bananagrams', started: Date.now() },
+      pieces: {
+        "1":{"type":"tile","letter":"E","id":1,"x":2,y:4},
+        "2":{"type":"tile","letter":"V","id":2,"x":3,y:4},
+        "3":{"type":"tile","letter":"R","id":3,"x":1,"y":0},
+        "5":{"type":"tile","letter":"E","id":5,"x":2,"y":0},
+        "6":{"type":"tile","letter":"E","id":6,x:3,y:0},
+        "7":{"type":"tile","letter":"C","id":7},
+        "8":{"type":"tile","letter":"E","id":8,x:3,y:2},
+        "9":{"type":"tile","letter":"E","id":9,x:4,y:2},
+        "10":{"type":"tile","letter":"E","id":10},
+        "11":{"type":"tile","letter":"A","id":11,x:1,y:1},
+        "12":{"type":"tile","letter":"G","id":12,x:1,y:2},
+        "13":{"type":"tile","letter":"D","id":13,"x":4,y:0},
+        "14":{"type":"tile","letter":"R","id":14,x:2,y:2},
+        "15":{"type":"tile","letter":"N","id":15,x:5,y:2}
+      },
+      board: [
+        [null,{"id":3},{"id":5},{"id":6},{"id":13},null],
+        [null,{"id":11},null,null,null,null],
+        [null,{"id":12},{"id":14},{"id":8},{"id":9},{"id":15}],
+        [null,null,null,null,null,null],
+        [null,null,{"id":1},{"id":2},null,null],
+        [null,null,null,null,null,null]
+      ]
+    };
+
+    expect(getIslands(newState)).toHaveLength(2);
+
+    newState = handleMessage(newState, {
+      sender: 'brian',
+      payload: { type: 'battleship' },
+      timestamp: Date.now() + stampOffset,
+      id: id++
+    }, {
+      userId: 'brian',
+      owner: 'brian',
+      rand,
+      gameId: '123',
+      config: {
+        seed: '',
+        minPlayers: 2
+      }
+    }).state;
+
+    expect(getIslands(newState)).toHaveLength(1);
+  }
+
   const Payloads: [number, EventPayload][] = [];
 
   for (const [pidx, payload] of Payloads) {
@@ -110,5 +164,8 @@ test('', () => {
 
     state = result.state;
     console.log(state);
+  }
+
+  {
   }
 });
