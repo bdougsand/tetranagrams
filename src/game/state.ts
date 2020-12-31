@@ -50,10 +50,11 @@ class GameServer extends Server {
 }
 
 export interface GameState extends SharedGameState {
-  // dropping: PieceData;
-  // These could be stored outside game state, e.g. in component state
-  // selectedColumn: number;
   lastEvent?: EventMessage<EventPayload>;
+  lastError?: any,
+
+  /** Modified in place */
+  eventCache?: { [k in string]: EventMessage<EventPayload> }
 }
 
 export interface AppState {
@@ -82,8 +83,13 @@ const Handlers: { [k in ActionType["type"]]: GameActionHandler<FindActionType<Ac
     return app;
   },
 
+  connect(app, action) {
+    app.server.joinGame({ id: action.gameId });
+
+    return app;
+  },
+
   create(app, action) {
-    console.log('creating');
     app.server.createGame(action.serverOptions);
     app.server.send({
       type: 'init',
@@ -152,6 +158,13 @@ const Handlers: { [k in ActionType["type"]]: GameActionHandler<FindActionType<Ac
     return app;
   },
 
+  restore(app, action) {
+    return {
+      ...app,
+      game: action.payload.game
+    };
+  },
+
   // Handle events coming back from the server ////////////////////////////////
   server_action(app, action) {
     const { event, params } = action.payload;
@@ -162,11 +175,21 @@ const Handlers: { [k in ActionType["type"]]: GameActionHandler<FindActionType<Ac
     }
 
     // TODO Display errors, if appropriate
+    if (result.error && event.sender === params.userId) {
+      return {
+        ...app,
+        /// virtually guaranteed to === app.game when an error occurs
+        game: { ...result.state, lastError: result.error }
+      };
+    }
 
     if (result.state === app.game)
       return app;
 
     result.state.lastEvent = event;
+    if (!result.state.eventCache)
+      result.state.eventCache = {};
+    result.state.eventCache[event.id] = event;
 
     return {
       ...app,
@@ -225,19 +248,19 @@ const testGame: GameState = {
     seed: "0.6fbsr19kvbo1enoq6rgg"},
   myId: "fakeID",
   trayTiles: [
-    {"id":1},{"id":2},{"id":7},{"id":10}
+    // {"id":1},{"id":2},{"id":7},{"id":10}
   ],
   "board": [
     [null,{"id":3},{"id":5},{"id":6},{"id":13},null],
     [null,{"id":11},null,null,null,null],
     [null,{"id":12},{"id":14},{"id":8},{"id":9},{"id":15}],
     [null,null,null,null,null,null],
-    [null,null,null,null,null,null],
+    [null,null,{"id":1},{"id":2},null,null],
     [null,null,null,null,null,null]
   ],
   "pieces": {
-    "1":{"type":"tile","letter":"E","id":1},
-    "2":{"type":"tile","letter":"V","id":2},
+    "1":{"type":"tile","letter":"E","id":1,"x":2,y:4},
+    "2":{"type":"tile","letter":"V","id":2,"x":3,y:4},
     "3":{"type":"tile","letter":"R","id":3,"x":1,"y":0},
     "5":{"type":"tile","letter":"E","id":5,"x":2,"y":0},
     "6":{"type":"tile","letter":"E","id":6,x:3,y:0},
@@ -247,7 +270,7 @@ const testGame: GameState = {
     "10":{"type":"tile","letter":"E","id":10},
     "11":{"type":"tile","letter":"A","id":11,x:1,y:1},
     "12":{"type":"tile","letter":"G","id":12,x:1,y:2},
-    "13":{"type":"tile","letter":"D","id":13},
+    "13":{"type":"tile","letter":"D","id":13,"x":4,y:0},
     "14":{"type":"tile","letter":"R","id":14,x:2,y:2},
     "15":{"type":"tile","letter":"N","id":15,x:5,y:2}
   },
@@ -256,6 +279,28 @@ const testGame: GameState = {
 
 const battleshipTestGame: GameState = {
   ...testGame,
+  eventCache: {
+    6: { sender: 'fakeID',
+           payload: {
+             type: 'guess',
+             targetId: 'otherPlayer',
+             coord: [3, 3],
+           },
+           timestamp: Date.now()-100,
+           id: 6
+         }
+  },
+  lastEvent: { sender: 'otherPlayer',
+               timestamp: Date.now(),
+               reId: 6,
+               id: 7,
+               payload: {
+                 type: 'answer',
+                 answer: 'Z',
+                 remaining: 5,
+                 coord: [3, 3],
+               }
+             },
   phase: { state: 'battleship', turn: 'fakeID' },
   pool: [],
   players: new Map([
@@ -263,8 +308,9 @@ const battleshipTestGame: GameState = {
       ['0,3', { guesserId: 'fakeID', letter: null }],
       ['5,5', { guesserId: 'fakeID', letter: 'N' }],
       ['3,3', { guesserId: 'fakeID', letter: 'Z' }],
-    ]) }],
-    ["jugador", { name: "Jugador", knownBoard: new Map([])}],
+    ]),
+                      remaining: 5 }],
+    ["jugador", { name: "Jugador", remaining: 0, knownBoard: new Map([])}],
     ["fakeID", { name: 'Test User', knownBoard: new Map([
       ['1,0', { guesserId: 'jugador', letter: 'R' }],
       ['0,1', { guesserId: 'otherPlayer', letter: null }],
@@ -276,7 +322,7 @@ function initApp(server: GameServer): AppState {
   return {
     server,
     // game: battleshipTestGame
-    game: testGame
+    // game: testGame
   };
 }
 
@@ -300,33 +346,35 @@ export function useGame(): [AppState, Dispatch<ActionType>] {
     //   }
     // };
 
-    server.current.handler = (event, server: GameServer) => {
-      dispatch({
+    /** Used to build the current state of the game from the event log */
+    let restoringState = initApp(server.current);
+
+    server.current.handler = (event, server: GameServer, restore) => {
+      const message: ActionType = {
         type: 'server_action',
         payload: {
           event,
           params: server.getParams()
         }
-      });
+      };
+
+      if (restore) {
+        restoringState = gameReducer(restoringState, message);
+        return;
+      } else if (restoringState) {
+        dispatch({
+          type: 'restore',
+          payload: {
+            game: restoringState.game
+          }
+        });
+        restoringState = null;
+      }
+      dispatch(message);
     };
 
     // server.current.on
   }, [dispatch, server]);
-
-  // const wrappedDispatch = useCallback((action => {
-  //   const untypedMessage = action as any;
-
-  //   if (untypedMessage.__dispatchId) {
-  //     console.log('Message already sent');
-  //     return;
-  //   }
-
-  //   untypedMessage.__dispatchId = uuid.v4();
-  //   console.log('assigned id:', untypedMessage.__dispatchId);
-
-  //   dispatch(action);
-
-  // }) as typeof dispatch, []);
 
   return [game, dispatch];
 }

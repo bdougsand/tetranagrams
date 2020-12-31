@@ -12,6 +12,11 @@ export type CreateAction = {
 export type DrawAction = {
   type: 'draw'
 };
+
+export type ConnectAction = {
+  type: 'connect',
+  gameId: string,
+};
 export type JoinAction = {
   type: 'join',
   gameId: string,
@@ -38,6 +43,13 @@ export type DropPiece = {
   }
 };
 
+export type RestoreAction = {
+  type: 'restore',
+  payload: {
+    game: any
+  }
+};
+
 /**
  * An action that originates from the server
  */
@@ -53,6 +65,8 @@ export type ServerAction = {
 export type ActionType =
   CreateAction
   | JoinAction
+  | ConnectAction
+  | RestoreAction
   | ServerAction
   | StartAction
   | DrawAction

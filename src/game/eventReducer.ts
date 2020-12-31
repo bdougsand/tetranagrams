@@ -26,10 +26,13 @@ export interface PlacedPieceData {
   y: number;
 }
 
+type TileLetter = string;
+
 export interface TileData {
   id: number;
   type: 'tile';
-  letter: string;
+  /** */
+  letter: TileLetter;
 }
 
 export type Shape = string[];
@@ -96,37 +99,6 @@ export interface ActionResult<S extends SharedGameState = SharedGameState, T=Eve
   responseRecipient?: string;
 }
 
-//https://hasbro-new.custhelp.com/app/answers/detail/a_id/19/~/how-many-of-each-letter-tile-are-included-in-a-scrabble-game%3F
-const LetterCounts = {
-  A: 9,
-  B: 2,
-  C: 2,
-  D: 4,
-  E: 12,
-  F: 2,
-  G: 3,
-  H: 2,
-  I: 9,
-  J: 1,
-  K: 1,
-  L: 4,
-  M: 2,
-  N: 6,
-  O: 8,
-  P: 2,
-  Q: 1,
-  R: 6,
-  S: 4,
-  T: 6,
-  U: 4,
-  V: 2,
-  W: 2,
-  X: 1,
-  Y: 2,
-  Z: 1,
-  // Blank: 2
-};
-
 const randomIndex = (pool: any[], rand=Math.random) => {
   return Math.floor(rand() * pool.length);
 };
@@ -155,7 +127,8 @@ const initBoard = (rows: number, cols: number): BoardState =>
 export type CoordString = string;
 export type KnownData = {
   guesserId?: string,
-  letter?: string | null
+  /** null on a miss */
+  letter?: TileLetter | null,
 };
 export type KnownBoard = Map<CoordString, KnownData>;
 type PlayerData = {
@@ -176,11 +149,6 @@ const initGame: ActionFn<InitPayload> = (_, event, server) => {
   const myId = server.userId;
 
   const { columns = 8, rows = 8, name = '', ownerName } = event.payload;
-  const pool = Object.keys(LetterCounts).reduce((pool, letter) => {
-    for (let i = Math.ceil(LetterCounts[letter]/2); i > 0; --i)
-      pool.push(letter);
-    return pool;
-  }, []);
 
   const state: SharedGameState = {
     name,
@@ -188,7 +156,7 @@ const initGame: ActionFn<InitPayload> = (_, event, server) => {
     ownerId: event.sender,
     players: new Map(),
     phase: { state: 'pregame' },
-    pool,
+    pool: [],
     rows,
     columns,
     rand: server.rand,
@@ -277,13 +245,17 @@ const startGame: ActionFn<StartPayload> = (state, { timestamp }) => {
       error: "You must have at least two players to start the game"
     };
 
+  const pool = $board.makePool($board.getLetterCounts(
+    state.players.size, state.columns, state.rows
+  ));
+
   return {
     state: _drawLetters({
       ...state,
       _nextId: state._nextId,
       phase: { state: 'bananagrams', started: timestamp },
       trayTiles: [...state.trayTiles],
-      pool: [...state.pool]
+      pool,
     }, StartingLetters)
   };
 };
@@ -409,22 +381,22 @@ const guess: ActionFn<GuessPayload> = (state, event) => {
                                 .set(coordStr, { guesserId: event.sender })
                             }));
 
-  return Object.assign({
-    state: {
-      ...state,
-      players,
-      phase: {
-        ...phase,
-        // Update the turn
-        turn: nextKey(state.players, sender)
-      }
+  const newState = {
+    ...state,
+    players,
+    phase: {
+      ...phase,
+      turn: nextKey(state.players, sender)
     }
+  };
+  return Object.assign({
+    state: newState
   }, payload.targetId === state.myId && {
     response: {
       type: 'answer',
       coord: payload.coord,
       answer: $board.getLetter(state, ...payload.coord),
-      remaining: $board.hiddenTiles(state).length,
+      remaining: $board.hiddenTiles(newState).length,
     } as AnswerPayload
   });
 };
@@ -489,23 +461,30 @@ const guessWord: ActionFn<GuessWordPayload> = (state, event) => {
     };
   }
 
-  // TODO Validate the direction
+  if (!$board.isValidDir(payload.dir)) {
+    return {
+      state,
+      error: "Invalid direction"
+    };
+  }
 
-  return Object.assign({
-    state: {
-      ...state,
-      phase: {
-        ...state.phase,
-        waitingForResponse: true
-      }
+  const newState = {
+    ...state,
+    phase: {
+      ...state.phase,
+      waitingForResponse: true
     }
+  };
+  return Object.assign({
+    state: newState
    }, payload.targetId === state.myId && {
     response: {
       type: 'word_response',
       coord: payload.coord,
       dir: payload.dir,
       guess: payload.guess,
-      isHit: $board.wordMatches(state, payload.guess, payload.coord, payload.dir)
+      isHit: $board.wordMatches(state, payload.guess, payload.coord, payload.dir),
+      remaining: $board.hiddenTiles(newState).length,
     } as GuessWordAnswerPayload
   });
 };
@@ -558,7 +537,7 @@ type AnswerPayload = {
   type: 'answer',
   coord: Coord,
   /** The value of the tile at the coordinate, or null if a miss */
-  answer: string | null,
+  answer: TileLetter | null,
   /** Number of tiles on the player's board that have not yet been revealed */
   remaining: number,
 };
@@ -585,6 +564,8 @@ export type GuessWordAnswerPayload = {
   dir: GuessWordPayload["dir"],
   guess: string,
   isHit: boolean,
+  /** Number of tiles on the player's board that have not yet been revealed */
+  remaining: number,
 };
 
 export type EventPayload =

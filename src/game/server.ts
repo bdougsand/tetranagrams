@@ -49,7 +49,7 @@ interface GameOptions {
   meta: GameMeta;
 };
 
-type EventHandler = (event: EventMessage, server: Server) => any;
+type EventHandler = (event: EventMessage, server: Server, restore?: boolean) => any;
 
 type CheckpointHandler = (checkpoint: Checkpoint) => any;
 type CheckpointConfig = {
@@ -103,6 +103,8 @@ class Server {
 
   /** Last used id when the game is first loaded */
   startingId = 0;
+
+  startingStamp = 0;
 
   /** Response messages waiting to be queued */
   responses = new Map<number, any>();
@@ -222,6 +224,7 @@ class Server {
     } else if (lastEvent.exists()) {
       const val = lastEvent.val();
       this.startingId = this.lastKey = parseInt(Object.keys(val)[0]);
+      this.startingStamp = (Object.values(val)[0] as EventMessage).timestamp;
     }
 
     this.configWasChanged();
@@ -272,7 +275,7 @@ class Server {
   async _onPrivateEventAdded(snap: DataSnapshot) {
     try {
       const event = snap.val() as PrivateEventMessage;
-      const result = this.handler?.(event, this);
+      const result = this.handler?.(event, this, event.timestamp < this.startingStamp);
 
       if (result.then) await result;
     } catch (e) {
@@ -321,7 +324,7 @@ class Server {
         return;
       }
 
-      const result = this.handler?.(event, this);
+      const result = this.handler?.(event, this, event.id < this.startingId);
 
       if (result.then) await result;
     } catch (e) {
@@ -371,6 +374,13 @@ class Server {
   }
 
   async joinGame(options: JoinGameOptions) {
+    if (this.ref) {
+      if (this.ref.key === options.id)
+        return;
+
+      this.stopListening();
+    }
+
     this.ref = this.db.ref(`games/${options.id}`);
     await this.startListening();
   }

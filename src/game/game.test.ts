@@ -1,8 +1,10 @@
 import seedrandom from 'seedrandom';
 import { getIslands } from './board';
+import * as $board from './board';
 
 import { ActionResult, EventPayload, handleMessage, SharedGameState } from './eventReducer';
 import { GameState } from './state';
+import { WildCard } from './constants';
 
 
 test('', () => {
@@ -121,17 +123,17 @@ test('', () => {
         "9":{"type":"tile","letter":"E","id":9,x:4,y:2},
         "10":{"type":"tile","letter":"E","id":10},
         "11":{"type":"tile","letter":"A","id":11,x:1,y:1},
-        "12":{"type":"tile","letter":"G","id":12,x:1,y:2},
+        "12":{"type":"tile","letter":WildCard,"id":12,x:1,y:2},
         "13":{"type":"tile","letter":"D","id":13,"x":4,y:0},
         "14":{"type":"tile","letter":"R","id":14,x:2,y:2},
         "15":{"type":"tile","letter":"N","id":15,x:5,y:2}
       },
       board: [
-        [null,{"id":3},{"id":5},{"id":6},{"id":13},null],
-        [null,{"id":11},null,null,null,null],
-        [null,{"id":12},{"id":14},{"id":8},{"id":9},{"id":15}],
-        [null,null,null,null,null,null],
-        [null,null,{"id":1},{"id":2},null,null],
+        [null,{"id":3},{"id":5},{"id":6},{"id":13},null],        // REED
+        [null,{"id":11},null,null,null,null],                    // A
+        [null,{"id":12},{"id":14},{"id":8},{"id":9},{"id":15}],  // GREEN
+        [null,null,null,null,null,null],                         //
+        [null,null,{"id":1},{"id":2},null,null],                 //  EV
         [null,null,null,null,null,null]
       ]
     };
@@ -155,6 +157,12 @@ test('', () => {
     }).state;
 
     expect(getIslands(newState)).toHaveLength(1);
+
+    expect($board.readLetters(newState, [1, 0], [1, 0])).toStrictEqual(['R', 'E', 'E', 'D']);
+    expect($board.wordMatches(newState, "reed", [1, 0], [1, 0])).toBeTruthy();
+
+    expect($board.wordMatches(newState, "preen", [1, 2], [1, 0])).toBeTruthy();
+    expect($board.wordMatches(newState, "green", [1, 2], [1, 0])).toBeTruthy();
   }
 
   const Payloads: [number, EventPayload][] = [];

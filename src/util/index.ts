@@ -16,8 +16,13 @@ export function setIn(obj: any, path: string[], val: any) {
 export function getFormData(target: HTMLFormElement, options: any = {}) {
   for (const elt of Array.from(target.elements) as HTMLInputElement[]) {
     if (!elt.name) continue;
+    let {name, value} = elt;
+    if (name.endsWith('{}')) {
+      name = name.slice(0, -2);
+      value = JSON.parse(value);
+    }
 
-    setIn(options, elt.name.split('.'), elt.value);
+    setIn(options, name.split('.'), value);
   }
 
   return options;

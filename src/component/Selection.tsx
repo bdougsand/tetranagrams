@@ -106,6 +106,8 @@ export default class Selection extends React.Component {
     e.preventDefault();
     e.stopPropagation();
 
+    options.onSelectionChange?.([]);
+
     this.setState({
       selecting: {
         start: [e.pageX, e.pageY],
@@ -178,7 +180,7 @@ export default class Selection extends React.Component {
 }
 
 export const useSelection = (options: Omit<EnabledSelectionOptions, 'onSelectionChange'>) => {
-  const { setSelectionOptions } = React.useContext(SelectionContext);
+  const {setSelectionOptions} = React.useContext(SelectionContext);
   const [selection, setSelection] = React.useState(new Set<string>());
 
   React.useEffect(() => {
@@ -196,7 +198,7 @@ export const useSelection = (options: Omit<EnabledSelectionOptions, 'onSelection
         enabled: false
       });
     };
-  }, []);
+  }, [setSelectionOptions]);
 
   return selection;
 };

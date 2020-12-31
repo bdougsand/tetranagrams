@@ -9,9 +9,13 @@ type JoinScreenProps = {
     dispatch: (action: ActionType) => any
 };
 
+const gameOptionsFromURL = (path: string) => {
+  const m = path.match(/\/game\/([^\/\s]+)/);
+  return m ? { action: 'join-game', gameId: m[1] } : null;
+};
 
 const JoinScreen: React.FunctionComponent<JoinScreenProps> = ({ dispatch }) => {
-  const [gameOptions, setGameOptions] = React.useState(null);
+  const [gameOptions, setGameOptions] = React.useState(gameOptionsFromURL(window.location.pathname) as any);
 
   const onSubmit = React.useCallback((e: React.FormEvent<HTMLFormElement>) => {
     const currentTarget = e.nativeEvent.currentTarget as HTMLFormElement;
@@ -49,6 +53,12 @@ const JoinScreen: React.FunctionComponent<JoinScreenProps> = ({ dispatch }) => {
     );
   }, [dispatch]);
 
+  const gameId = gameOptions?.gameId;
+  React.useEffect(() => {
+    if (gameId)
+      dispatch({ type: 'connect', gameId });
+  }, [gameId, dispatch]);
+
   if (!gameOptions) {
     return (
       <div className="join-screen screen">
@@ -80,6 +90,15 @@ const JoinScreen: React.FunctionComponent<JoinScreenProps> = ({ dispatch }) => {
           Player Name
           <input type="text" name="userName"/>
         </label>
+        {gameOptions.action === 'new-game' &&
+         <label>
+           Board Size
+           <select name="boardSize">
+             <option value="8,8">Small (8x8)</option>
+             <option value="10,10">Medium (10x10)</option>
+             <option value="12,12">Large (12x12)</option>
+           </select>
+        </label>}
         <button type="submit">Submit</button>
       </form>
     </div>

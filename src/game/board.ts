@@ -1,3 +1,5 @@
+import { zip } from '../util/iter';
+import { PerTileLetterCounts, WildCard } from './constants';
 import type {
   BoardState,
   PieceData,
@@ -14,12 +16,26 @@ import type { GameState } from './state';
 
 export type HasBoard = Pick<GameState, 'board' | 'pieces'>;
 export type HasGrid = Pick<GameState, 'rows' | 'columns'>;
+type Direction = [(-1 | 0 | 1), (-1 | 0 | 1)];
+
+const LegalDirs: Direction[] = [[0, -1], [1, 0]];
 
 const isBlank = (board: BoardState, row: number, column: number): boolean =>
   !(row in board) || !(column in board[row]) || !board[row][column];
 
+export const normalizeChar = (c: string) =>
+  c.normalize('NFD')[0].toUpperCase();
+
+
+/// XXX Use 'TileLetter' instead of string...
+export const letterMatches = (tileLetter: string, letter: string) =>
+  tileLetter === letter || tileLetter === WildCard || tileLetter === normalizeChar(letter);
+
 export const isValidCoord = ({rows, columns}: HasGrid, [x, y]: Coord) =>
   x >= 0 && x < columns && y >= 0 && y < rows;
+
+export const isValidDir = (d: [number, number]) =>
+  Array.isArray(d) && LegalDirs.some(([dx, dy]) => (d[0] === dx && d[1] === dy));
 
 export const getLetter = (game: HasBoard, column: number, row: number): string => {
   const piece = game.pieces[game.board[row]?.[column]?.id];
@@ -31,6 +47,33 @@ const pi_2 = Math.PI / 2;
 const rotate = (x: number, y: number, steps: number = 1) =>
   ([x * Math.cos(pi_2 * steps) - y * Math.sin(pi_2 * steps),
     x * Math.sin(pi_2 * steps) + y * Math.cos(pi_2 * steps)]);
+
+///// This probably belongs in another file
+export function getLetterCounts(players: number, width: number, height: number) {
+  const totalTiles = players * width * height;
+  let count = 0;
+
+  const letterCounts = Object.keys(PerTileLetterCounts).reduce(
+    (lc, l) => {
+      count += (lc[l] = Math.ceil(totalTiles * PerTileLetterCounts[l]));
+      return lc;
+    }, {} as { [k in string]: number });
+
+  // Ensure that all players will get an equal number of tiles; pad the pool
+  // with wildcard tiles
+  letterCounts[WildCard] += players - (count % players);
+
+  return letterCounts;
+}
+
+export function makePool(letterCounts: ReturnType<typeof getLetterCounts>) {
+  const pool: string[] = [];
+  for (const letter of Object.keys(letterCounts)) {
+    for (let i = letterCounts[letter]; i > 0; --i)
+      pool.push(letter);
+  }
+  return pool;
+}
 
 /**
  * convert array of strings into an array of relative coordinates, relative to the top left [0,0] of shape, unrotated
@@ -170,7 +213,6 @@ export function getTiles(game: GameState, coords: Coord[]): PlacedPiece[] {
   return coords.map(([x, y]) => game.pieces[game.board[y][x].id]) as PlacedPiece[];
 }
 
-type Direction = [(-1 | 0 | 1), (-1 | 0 | 1)];
 export function traceChain(game: GameState, coord: Coord, dir: Direction): Coord[] {
   let [x, y] = coord;
   const [dx, dy] = dir
@@ -185,20 +227,38 @@ export function traceChain(game: GameState, coord: Coord, dir: Direction): Coord
   return pieces
 }
 
-export function readWord(game: GameState, coord: Coord, dir: Direction): string {
+export function readLetters(game: GameState, coord: Coord, dir: Direction) {
   const chain = traceChain(game, coord, dir);
   return chain ?
     getTiles(game, [coord].concat(chain))
-      .map(piece => getLetter(game, piece.x, piece.y)).join('')
-    : null;
+      .map(piece => getLetter(game, piece.x, piece.y))
+    : [];
 }
 
-export function wordMatches(game: GameState, word: string, coord: Coord, dir: Direction): boolean {
-  return readWord(game, coord, dir)?.toLocaleLowerCase() === word.toLocaleLowerCase();
+export function normalizeWord(word: string) {
+  return Array.from(
+    word.normalize('NFC'),
+    lett => {
+      const nl = lett.normalize('NFD')[0].toUpperCase();
+      return nl in PerTileLetterCounts ? nl : '';
+    }
+  ).join('');
 }
+
+export function wordMatches(game: GameState, word: string, coord: Coord, dir: Direction) {
+  word = normalizeWord(word);
+  console.log(word);
+  for (const [actual, letter] of zip(readLetters(game, coord, dir), word)) {
+    if (!letterMatches(actual, letter))
+      return false;
+  }
+
+  return true;
+}
+
 
 export function getTileChains(game: GameState, coord: Coord): PlacedPiece[][] {
-  const dirs: Direction[] = [[1, 0], [0, -1]];
+  const dirs = LegalDirs;
   const chains: PlacedPiece[][] = [];
 
   for (const [dx, dy] of dirs) {
@@ -378,9 +438,9 @@ export function *iterBattleshipBoard(game: GameState, userId: string){
  * in each direction.
  */
 export function fitWord(board: KnownBoard, coord: Coord, word: string, grid: HasGrid) {
-  word = word.toLocaleLowerCase();
+  word = word.toLocaleUpperCase();
   const [x0, y0] = coord;
-  const legalDirs = [[0, -1], [1, 0]];
+  const legalDirs = LegalDirs;
 
   let i = 0;
   let done = 0;
@@ -401,9 +461,9 @@ export function fitWord(board: KnownBoard, coord: Coord, word: string, grid: Has
 
       if (isValidCoord(grid, [x, y])) {
         const known = board.get(`${x},${y}`);
-        const letter = known?.letter?.toLocaleLowerCase();
+        const letter = known?.letter?.toLocaleUpperCase();
 
-        if ((!letter && !known) || letter === c) {
+        if ((!letter && !known) || letterMatches(letter, c)) {
           dirResult.tiles.push({ x, y, letter: c });
           dirResult.word += c;
           continue;

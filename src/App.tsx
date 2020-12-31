@@ -18,6 +18,7 @@ import PregameScreen from './screen/Pregame';
 
 import Countdown from './component/Countdown';
 import Selection, { useSelection } from './component/Selection';
+import LastEvent from './component/LastEvent';
 
 
 type TileProps = {
@@ -252,14 +253,14 @@ const BananaPhase: React.FC<BananaPhaseProps> = ({ game, dispatch }) => {
   });
   const isSelected = React.useCallback(
     (_c, _r, id) => (id && !isOver && selected.has(''+id)),
-    [selected]);
+    [selected, isOver]);
 
-  const islands = React.useMemo(() => {
-    return $board.getIslands(game);
-  }, [game.pieces])
+  const islands = React.useMemo(() => $board.getIslands(game),
+                                [game.pieces])
   const isleCount = islands.length - 1;
 
   const trayTiles = game.trayTiles.map(({ id }) => game.pieces[id]);
+  console.log(game);
 
   return (
     <>
@@ -354,17 +355,17 @@ type BattleshipCellProps = {
   fittingTiles: FittingTiles
 };
 const BattleshipCell: React.FC<BattleshipCellProps> = ({ row, column, targeted, fittingTiles }) => {
-    const fitting = fittingTiles[`${column},${row}`];
+  const fitting = fittingTiles[`${column},${row}`];
 
-    return (
-      (row === targeted[1] && column === targeted[0])
-      ? <div className={$u.classnames("targeting overlay", { fitting: !!fitting })}>
-        {fitting || '*'}
+  return (
+    (row === targeted[1] && column === targeted[0])
+    ? <div className={$u.classnames("targeting overlay", { fitting: !!fitting })}>
+      {fitting || '*'}
       </div>
-      : fitting
-      ? <div className="fitting">{fitting}</div>
-      : null);
-  };
+    : fitting
+    ? <div className="fitting">{fitting}</div>
+    : null);
+};
 
 type BattleshipPhaseProps = {
   game: GameState,
@@ -372,21 +373,24 @@ type BattleshipPhaseProps = {
 };
 
 const BattleshipPhase: React.FC<BattleshipPhaseProps> = ({ game, dispatch }) => {
-  const { turn } = game.phase as BattleshipPhaseType;
+  const { turn, waitingForResponse } = game.phase as BattleshipPhaseType;
   const { myId, players } = game;
   const player = players.get(turn);
   const myTurn = turn === myId;
 
   const [[targetedId, targetedCoords], setTargeting] = useState([null, null] as [string, Coord]);
   let [guessedWord, setGuessedWord] = useState('');
+  // The user's current /preference/ for word direction. Resets when the word is cleared or submitted. Ignored if the word fits better in another direction.
+  let [wordDirection, setWordDirection] = useState(null);
   const [launching, setLaunching] = useState(false);
+  const wordInputRef = React.useRef(null);
 
   const onSelect = React.useCallback(e => {
     const { 'data-coords': coords, 'data-playerid': targetId } =
       $u.getAttributes(e, ['data-coords', 'data-playerid']);
 
     if (!coords || !targetId || targetId === game.myId ||
-        !players.get(targetId)?.remaining) {
+        players.get(targetId)?.remaining === 0) {
       setTargeting([null, null]);
       return;
     }
@@ -396,36 +400,62 @@ const BattleshipPhase: React.FC<BattleshipPhaseProps> = ({ game, dispatch }) => 
       coords.split(',').map(x => parseInt(x)) as Coord
     ]);
 
+    wordInputRef.current?.focus();
     e.preventDefault();
     e.stopPropagation();
-  }, [game.players]);
+  }, [game.players, game.myId]);
 
   const onLaunch = React.useCallback(e => {
+    const data = $u.getFormData(e.nativeEvent.currentTarget);
+    const {
+      dir,
+      targetedId: targetId,
+      targetedCoords: coord,
+      word
+    } = data;
+
     dispatch(Object.assign({
       type: 'guess',
-      targetId: targetedId,
-      coord: targetedCoords,
-    }, guessedWord && {
+      targetId,
+      coord,
+    }, word && {
       type: 'word',
-      dir: [1, 0],
-      guess: guessedWord,
+      dir: dir || [1, 0],
+      guess: word,
     }) as ActionType);
 
     setLaunching(true);
 
     e.preventDefault();
     e.stopPropagation();
-  }, [targetedId, targetedCoords, guessedWord, dispatch]);
+  }, [dispatch]);
 
   const onChangeGuessText = React.useCallback(e => {
-    setGuessedWord(e.currentTarget.value);
+    console.log(Array.from(e.currentTarget.value, l => l[0]));
+    setGuessedWord(e.currentTarget.value.replace(/[^a-zà-ÿ´`¨ˆˇ¯]|([´`¨ˆˇ¯](?!$))/ig, ''));
+  }, []);
+
+  const onKeyUp = React.useCallback(e => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      setGuessedWord('');
+      setWordDirection(null);
+      wordInputRef.current?.blur();
+    } else if (e.key === 'ArrowRight') {
+      setWordDirection([1, 0]);
+    } else if (e.key === 'ArrowDown') {
+      setWordDirection([0, -1]);
+    }
   }, []);
 
   React.useEffect(() => {
     // Runs at the beginning and end of the player's turn
     setTargeting([null, null]);
     setLaunching(false);
-  }, [myTurn]);
+    setGuessedWord('');
+    setWordDirection(null);
+    // TODO Using these deps could cause some weird behavior
+  }, [myTurn, waitingForResponse]);
 
   let fittingTiles = {};
   if (targetedId && targetedCoords && guessedWord) {
@@ -440,7 +470,16 @@ const BattleshipPhase: React.FC<BattleshipPhaseProps> = ({ game, dispatch }) => 
         return fits;
       }, [] as ReturnType<typeof fitWord>);
 
+
+    if (bestFits.length === 1)
+      wordDirection = bestFits[0].dir;
+
     for (const fit of bestFits) {
+      // Only strictly need the first comparison atm, but we may add other
+      // directions (e.g., diagonal)
+      if (wordDirection && !(fit.dir[0] === wordDirection[0] && fit.dir[1] === wordDirection[1]))
+        continue;
+
       for (const tile of fit.tiles) {
         fittingTiles[`${tile.x},${tile.y}`] = tile.letter;
       }
@@ -483,7 +522,8 @@ const BattleshipPhase: React.FC<BattleshipPhaseProps> = ({ game, dispatch }) => 
   });
 
   return (
-    <div className={$u.classnames('battleship', { 'my-turn': myTurn })}>
+    <div className={$u.classnames('battleship', { 'my-turn': myTurn, launching })}>
+      <LastEvent game={game} />
       <h3 className="instructions">
         {myTurn ?
          launching ? 'Launching...' : 'Pick a target!' :
@@ -494,17 +534,26 @@ const BattleshipPhase: React.FC<BattleshipPhaseProps> = ({ game, dispatch }) => 
       </div>
 
       <div className="controls-wrapper">
-        <div className="launch-controls">
-          <button disabled={!targetedCoords} onClick={onLaunch}>
-            {!targetedCoords ? 'Aim!' : 'Launch!'}
-          </button>
+        <form className="launch-controls" onSubmit={onLaunch}>
           <label>
             Guess Word<br/>
             <input type="text"
+                   name="word"
+                   readOnly={launching || !myTurn}
                    value={guessedWord}
-                   onChange={onChangeGuessText} />
+                   onChange={onChangeGuessText}
+                   onKeyUp={onKeyUp}
+                   ref={wordInputRef}
+            />
           </label>
-        </div>
+          <input type="hidden" name="dir{}" value={JSON.stringify(wordDirection)} />
+          <input type="hidden" name="targetedId" value={targetedId || ''} />
+          <input type="hidden" name="targetedCoords{}" value={JSON.stringify(targetedCoords)} />
+          <button disabled={!targetedCoords}
+                  type="submit">
+            {!targetedCoords ? 'Aim!' : 'Launch!'}
+          </button>
+        </form>
       </div>
     </div>
   );
@@ -546,12 +595,15 @@ function App() {
   // );
   const [app, dispatch] = useGame();
 
+  const showJoinScreen = !app.game ||
+                         (app.game.phase.state === 'pregame' && !app.game.players.has(app.game.myId));
   return (
     <Selection>
       <div className="App">
         {
-          app.game ? <GameScreen game={app.game} dispatch={dispatch} /> : 
-          <JoinScreen game={app.game} dispatch={dispatch} />
+          showJoinScreen ?
+          <JoinScreen game={app.game} dispatch={dispatch} /> :
+          <GameScreen game={app.game} dispatch={dispatch} />
         }
       </div>
     </Selection>
